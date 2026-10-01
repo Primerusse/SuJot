@@ -29,18 +29,16 @@ A minimal, self-hosted Markdown notebook.
 <a id="intro"></a>
 ## 📖 简介 · Introduction
 
-**写给一个人的笔记库。** 自己写、自己看、自己备份 —— 不打算做成协作工具，也没打算做成 SaaS，
-更不要求你信任任何人的服务器。
+**个人极简笔记库** 自己写、自己看、自己备份 —— 不打算做成协作工具，也没打算做成 SaaS，更不要求你信任任何人的服务器。
 
-它有两种活法，用的是**同一份代码**：
+它有两种应用环境，用的是**同一份代码**：
 
 | 怎么用 | 适合谁 | 长什么样 |
 | --- | --- | --- |
-| **只在自己电脑上跑** | 想有个安静地方记笔记，不想折腾服务器 | 双击 `start_run_locally.cmd`（Windows）或跑 `./start_run_locally.sh`（Linux / macOS），浏览器打开 `127.0.0.1:8013` 就是你的笔记库；关掉窗口就是关掉服务 |
-| **部署到服务器** | 想在任何设备上打开，想让笔记长期在线 | 一条命令装成 systemd 服务（开机自启），前面挂 nginx + HTTPS，域名一填就能从手机、平板、公司电脑访问 |
+| **个人电脑** | 想有个安静地方记笔记，不想折腾服务器 | 浏览器打开 `127.0.0.1:8013` 就是你的笔记库；关掉窗口就是关掉服务 |
+| **服务器** | 想在任何设备上打开，想让笔记长期在线 | 一条命令装成 systemd 服务（开机自启），前面挂 nginx + HTTPS，域名一填就能从手机、平板、公司电脑访问 |
 
-无论哪种活法，**笔记始终是磁盘上普通的 `.md` 文件** —— 服务挂了、你不想用了，
-用任何编辑器都能直接把笔记打开。
+无论哪种活法，**笔记始终是磁盘上普通的 `.md` 文件** —— 服务挂了、你不想用了，用任何编辑器都能直接把笔记打开。
 
 技术上：只用 **Python 标准库 + 原生 JS**，**零依赖、零构建、无数据库**、单进程，
 Markdown 是唯一正文数据源，前端没有 Node 工具链，没有任何会腐烂的依赖。
@@ -93,38 +91,13 @@ cd 你解压出来的目录
 
 ---
 
-<a id="author"></a>
 ## 👤 关于作者 · Author
 
 **Primerusse**
+*   学历(Education)：在读本科 (Undergraduate Student)
+*   个人博客(Blog)：[primerusse.top](https://primerusse.top)
+*   邮箱(Email)：primerusse@gmail.com <br> (📧 来信请在主题说明来意 / 📧 Please state the purpose of your email in the subject line)
+*   研究兴趣(Research Interests)：<br>计算力学 (Computational Mechanics)<br>有限元分析 (Finite Element Analysis)<br>数值仿真 (Numerical Simulation)<br>数学 (Mathematics)
 
-- 学历 Education：在读本科 Undergraduate Student
-- 个人博客 Blog：[primerusse.top](https://primerusse.top)
-- 邮箱 Email：primerusse@gmail.com（📧 来信请在主题说明来意 / Please state the purpose of your email in the subject line）
-- 研究兴趣 Research Interests：计算力学 (Computational Mechanics)、有限元分析 (Finite Element Analysis)、数值仿真 (Numerical Simulation)、数学 (Mathematics)
-
----
-
-<div align="center">
-
-**⭐ 如果速笺对你有用，欢迎给个 Star 支持一下！**
-**⭐ If SuJot is helpful to you, please give it a Star to support!**
-
-<sub>速笺 SuJot · MIT License · Copyright (c) 2026 Primerusse</sub>
-
-<a href="#intro">回到顶部 ↑</a>
-
-</div>
-
----
-
-<div align="center">
-
-**⭐ 如果速笺对你有用，欢迎给个 Star 支持一下！**
-**⭐ If SuJot is helpful to you, please give it a Star to support!**
-
-<sub>速笺 SuJot · MIT License · Copyright (c) 2026 Primerusse</sub>
-
-<a href="#intro">回到顶部 ↑</a>
-
-</div>
+⭐ 如果这些代码对你的学习有帮助，欢迎给个 Star 支持一下！<br>
+⭐ If these codes are helpful to your study, please give a Star to support!
