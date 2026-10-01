@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="system">
+<meta name="application-name" content="SuJot">
+<meta name="apple-mobile-web-app-title" content="SuJot">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>速笺 SuJot</title>
+<link rel="stylesheet" href="/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="/vendor/fonts/wenkai/wenkai.css">
+<link rel="stylesheet" href="/app.css?v=135">
+<link rel="icon" type="image/png" sizes="32x32" href="/sujot-favicon-32.png?v=4">
+<link rel="icon" type="image/png" sizes="64x64" href="/sujot-favicon-64.png?v=4">
+<link rel="apple-touch-icon" sizes="180x180" href="/sujot-favicon.png?v=4">
+</head>
+<body>
+<div id="app" class="shell" hidden>
+
+
+  <div class="body" id="body">
+
+    <!-- 竖向导航栏 -->
+    <nav class="rail" id="rail" aria-label="主导航">
+      <!-- 品牌：左导航栏最上面，上 logo、下速笺 -->
+      <div class="side-brand" id="rail-brand" role="button" tabindex="0" title="回到首页">
+        <img class="logo" id="brand-logo" src="/sujot-logo-52.png?v=5" srcset="/sujot-logo-26.png?v=5 1x, /sujot-logo-52.png?v=5 2x, /sujot-logo-104.png?v=5 3x" alt="">
+        <span class="brand-name" id="brand-name">速笺</span>
+      </div>
+      <button class="rail-btn on" id="nav-tree" data-view="tree" title="文件">
+        <svg viewBox="0 0 16 16" class="ico"><path d="M2 3.5h4l1.2 1.5H14v7.5H2z"/><path d="M2 3.5v9.5h12"/></svg>
+        <span>文件</span>
+      </button>
+      <button class="rail-btn" id="nav-fav" data-pane="fav" title="收藏夹">
+        <svg viewBox="0 0 16 16" class="ico"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z"/></svg>
+        <span>收藏夹</span>
+      </button>
+      <button class="rail-btn" id="nav-trash" data-view="trash" title="回收站">
+        <svg viewBox="0 0 16 16" class="ico"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M5 4.5l.6 8h4.8l.6-8"/></svg>
+        <span>回收站</span>
+        <i class="dot" id="trash-dot" hidden></i>
+      </button>
+      <button class="rail-btn" id="nav-set" data-view="set" title="设置">
+        <svg viewBox="0 0 16 16" class="ico"><circle cx="8" cy="8" r="2.3"/>
+          <path d="M12.9 9.7a1.1 1.1 0 0 0 .2 1.2l.1.1a1.3 1.3 0 1 1-1.9 1.9l-.1-.1a1.1 1.1 0 0 0-1.2-.2 1.1 1.1 0 0 0-.7 1v.2a1.3 1.3 0 1 1-2.6 0v-.1a1.1 1.1 0 0 0-.7-1 1.1 1.1 0 0 0-1.2.2l-.1.1a1.3 1.3 0 1 1-1.9-1.9l.1-.1a1.1 1.1 0 0 0 .2-1.2 1.1 1.1 0 0 0-1-.7h-.2a1.3 1.3 0 1 1 0-2.6h.1a1.1 1.1 0 0 0 1-.7 1.1 1.1 0 0 0-.2-1.2l-.1-.1a1.3 1.3 0 1 1 1.9-1.9l.1.1a1.1 1.1 0 0 0 1.2.2h.1a1.1 1.1 0 0 0 .7-1v-.2a1.3 1.3 0 1 1 2.6 0v.1a1.1 1.1 0 0 0 .7 1 1.1 1.1 0 0 0 1.2-.2l.1-.1a1.3 1.3 0 1 1 1.9 1.9l-.1.1a1.1 1.1 0 0 0-.2 1.2v.1a1.1 1.1 0 0 0 1 .7h.2a1.3 1.3 0 1 1 0 2.6h-.1a1.1 1.1 0 0 0-1 .7z"/></svg>
+        <span>设置</span>
+      </button>
+
+      <span class="rail-gap"></span>
+      <!-- 快捷键 / 深浅色 / 账号：按用户口径放在左导航栏最下方 -->
+      <button class="rail-btn" id="btn-keys" title="快捷键（?）" aria-label="快捷键">
+        <svg viewBox="0 0 16 16" class="ico"><circle cx="8" cy="8" r="6"/><path d="M6.4 6.2a1.7 1.7 0 1 1 2 1.7v.9M8.2 11.3h.01"/></svg>
+        <span>快捷键</span>
+      </button>
+      <button class="rail-btn" id="btn-theme" title="主题切换（深色 / 浅色）" aria-label="主题切换">
+        <svg viewBox="0 0 16 16" class="ico"><path d="M8 2v2M8 12v2M2 8h2M12 8h2M4 4l1.4 1.4M10.6 10.6L12 12M12 4l-1.4 1.4M5.4 10.6L4 12"/><circle cx="8" cy="8" r="2.6"/></svg>
+        <span>主题切换</span>
+      </button>
+      <div class="user rail-user" id="user">
+        <button class="rail-btn" id="btn-user" title="账号">
+          <span class="avatar" id="avatar">P</span><span>账号</span>
+        </button>
+        <div class="menu" id="user-menu" hidden>
+          <div class="menu-head" id="menu-head">—</div>
+          <button class="menu-item" id="mi-settings">
+            <svg viewBox="0 0 16 16" class="ico"><circle cx="8" cy="5.6" r="3"/><path d="M2.6 14c0-2.9 2.4-4.7 5.4-4.7s5.4 1.8 5.4 4.7"/></svg>用户设置
+          </button>
+          <button class="menu-item danger" id="mi-logout">
+            <svg viewBox="0 0 16 16" class="ico"><path d="M6 2H3.5A1.5 1.5 0 0 0 2 3.5v9A1.5 1.5 0 0 0 3.5 14H6M10 5l3 3-3 3M13 8H6"/></svg>退出账号
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <!-- 左侧目录（NavigationView） -->
+    <aside class="sidebar" id="sidebar" data-pane="tree">
+      <!-- 第一行：搜索框 + （右侧两个新建按钮，独立于搜索框之外） -->
+      <div class="side-top">
+      <div class="searchbox" id="searchbox">
+        <svg viewBox="0 0 16 16" class="ico search-go" id="search-go" role="button" tabindex="0" aria-label="开始搜索"><circle cx="7" cy="7" r="4.2"/><path d="M10.5 10.5L14 14"/></svg>
+        <input id="filter" type="search" placeholder="搜索…" autocomplete="off">
+        <div class="scope" id="scope-wrap">
+          <button class="scope-btn" id="scope-btn" title="搜索范围" aria-haspopup="listbox" aria-expanded="false">
+            <span id="scope-label">名称+内容</span>
+            <svg viewBox="0 0 16 16" class="ico"><path d="M4 6.5l4 4 4-4"/></svg>
+          </button>
+          <div class="scope-menu" id="scope-menu" role="listbox" hidden>
+            <button role="option" data-scope="both" aria-selected="true">名称和内容都搜</button>
+            <button role="option" data-scope="title" aria-selected="false">只搜名称</button>
+            <button role="option" data-scope="body" aria-selected="false">只搜内容</button>
+          </div>
+        </div>
+      </div>
+        <button class="icon-btn side-new" id="side-new" title="新建笔记（Ctrl+N）" aria-label="新建笔记">
+          <svg viewBox="0 0 16 16" class="ico"><path d="M8 3.2v9.6M3.2 8h9.6"/></svg>
+        </button>
+        <button class="icon-btn side-new" id="side-newdir" title="新建文件夹" aria-label="新建文件夹">
+          <svg viewBox="0 0 16 16" class="ico"><path d="M2 4.5h4l1.2 1.5H14v6.5H2z"/><path d="M8 7v3.2M6.4 8.6h3.2"/></svg>
+        </button>
+      </div>
+      <nav class="tree" id="tree" aria-label="笔记树"></nav>
+      <div class="side-grip" id="side-grip" title="拖动调整宽度（双击复位）"></div>
+      <div class="side-foot">
+        <span id="stat-count">—</span>
+        <span class="flex"></span>
+      </div>
+      <div class="pane-inside" id="pane-fav" hidden>
+        <div class="ol-list" id="fav-list"></div>
+        <p class="panel-hint">还没有收藏。看到想常翻的，按 <kbd>Ctrl</kbd><kbd>D</kbd> 把它钉在这儿。</p>
+      </div>
+
+      <!-- 回收站（栏目，与收藏夹同宽） -->
+      <div class="pane-inside" id="pane-trash" hidden>
+        <div class="pane-head">
+          <span class="pane-title">回收站</span>
+          <span class="page-n" id="trash-n"></span>
+          <span class="flex"></span>
+          <button class="tb-btn wide" id="trash-restore-all" title="全部还原">全部还原</button>
+          <button class="tb-btn wide danger" id="trash-empty" title="清空回收站">清空</button>
+        </div>
+        <div class="pane-scroll">
+          <div class="trash-cards" id="trash-cards"></div>
+          <p class="empty-hint" id="trash-empty-hint" hidden><svg viewBox="0 0 16 16" class="ico eh-ic"><path d="M3 4h10M6.5 4V2.8h3V4M4.4 4l.7 9.2h5.8L11.6 4"/></svg><b>回收站里空无一物</b><span>删掉的笔记会先来这里待一阵</span></p>
+        </div>
+      </div>
+
+      <!-- 设置（栏目，与收藏夹同宽） -->
+      <div class="pane-inside" id="pane-set" hidden>
+        <div class="pane-head"><span class="pane-title">设置</span></div>
+        <div class="set-search">
+          <svg viewBox="0 0 16 16" class="ico"><circle cx="7" cy="7" r="4.2"/><path d="M10.5 10.5L14 14"/></svg>
+          <input id="set-search" type="search" placeholder="搜索设置…" autocomplete="off">
+        </div>
+        <div class="panel-hint" id="set-nohit" hidden>没有匹配的设置项</div>
+<nav class="set-nav" id="set-nav">
+      <button class="set-nav-btn on" data-sec="look">外观</button>
+      <button class="set-nav-btn" data-sec="read">阅读</button>
+      <button class="set-nav-btn" data-sec="edit">编辑</button>
+      <button class="set-nav-btn" data-sec="brand">网站</button>
+      <button class="set-nav-btn" data-sec="avatar">头像</button>
+      <button class="set-nav-btn" data-sec="data">数据</button>
+      <button class="set-nav-btn" data-sec="about">关于</button>
+    </nav>
+        <div class="set-main" id="set-main">
+
+      <section class="set-sec on" data-sec="look">
+        <div class="set-group">
+          <div class="set-h">主题</div>
+          <div class="set-row">
+            <span class="set-l">配色<em>浅色或深色</em></span>
+            <div class="set-seg" id="set-theme">
+              <button data-v="light">浅色</button>
+              <button data-v="dark">深色</button>
+            </div>
+          </div>
+          <div class="set-row">
+            <span class="set-l">磨砂强度<em>四块面板背后透出的模糊程度，0% 完全实心</em></span>
+            <div class="set-range">
+              <input type="range" id="set-blur" min="0" max="100" step="5">
+              <span class="set-range-v" id="set-blur-v">60%</span>
+            </div>
+          </div>
+        </div>
+        <div class="set-group">
+          <div class="set-h">排版</div>
+          <div class="set-row">
+            <span class="set-l">正文字号<em>右侧预览里的字号</em></span>
+            <div class="set-seg" id="set-font">
+              <button data-v="14">小</button>
+              <button data-v="15">标准</button>
+              <button data-v="17">大</button>
+            </div>
+          </div>
+          <div class="set-row">
+            <span class="set-l">正文行距<em>行与行之间的宽松程度</em></span>
+            <div class="set-seg" id="set-lineh">
+              <button data-v="1.6">紧凑</button>
+              <button data-v="1.78">标准</button>
+              <button data-v="2">宽松</button>
+            </div>
+          </div>
+          <div class="set-row">
+            <span class="set-l">编辑字号<em>左边写字的字号，比正文小一点更好认</em></span>
+            <div class="set-seg" id="set-editfont">
+              <button data-v="12.5">小</button>
+              <button data-v="13.5">标准</button>
+              <button data-v="15">大</button>
+            </div>
+          </div>
+        </div>
+        <div class="set-group">
+          <div class="set-h">编辑器</div>
+          <div class="set-row">
+            <span class="set-l">显示行号<em>编辑器左侧那列行数</em></span>
+            <label class="sw"><input type="checkbox" id="set-lineno"><span></span></label>
+          </div>
+          <div class="set-row">
+            <span class="set-l">自动换行<em>长句子换行显示，不横向拖</em></span>
+            <label class="sw"><input type="checkbox" id="set-wrap"><span></span></label>
+          </div>
+          <div class="set-row">
+            <span class="set-l">代码着色<em>编辑器里代码的配色方案</em></span>
+            <div class="set-seg" id="set-hl">
+              <button data-v="off">关闭</button>
+              <button data-v="classic">经典</button>
+              <button data-v="vivid">鲜明</button>
+              <button data-v="soft">柔和</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="set-sec" data-sec="read">
+        <div class="set-group">
+          <div class="set-h">读的时候</div>
+          <div class="set-row">
+            <span class="set-l">公式横向滚动<em>公式太宽时只滚公式本身，不撑破版面</em></span>
+            <label class="sw"><input type="checkbox" id="set-mathscroll"><span></span></label>
+          </div>
+          <div class="set-row">
+            <span class="set-l">点图放大<em>点正文里的图片全屏看，← → 可翻页</em></span>
+            <label class="sw"><input type="checkbox" id="set-lightbox"><span></span></label>
+          </div>
+        </div>
+        <div class="set-group">
+          <div class="set-h">栏位</div>
+          <div class="set-row">
+            <span class="set-l">默认展开大纲<em>打开笔记时右侧大纲是否自动显示</em></span>
+            <label class="sw"><input type="checkbox" id="set-outline"><span></span></label>
+          </div>
+          <div class="set-row">
+            <span class="set-l">侧栏宽度<em>文件栏和大纲栏的宽度，也可以直接拖边框</em></span>
+            <div class="set-seg" id="set-side">
+              <button data-v="220">窄</button>
+              <button data-v="268">适中</button>
+              <button data-v="330">宽</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="set-sec" data-sec="edit">
+        <div class="set-group">
+          <div class="set-h">写的时候</div>
+          <div class="set-row">
+            <span class="set-l">自动保存<em>停笔多久自动存一次</em></span>
+            <div class="set-seg" id="set-autosave">
+              <button data-v="1000">1 秒</button>
+              <button data-v="2500">2.5 秒</button>
+              <button data-v="5000">5 秒</button>
+            </div>
+          </div>
+          <div class="set-row">
+            <span class="set-l">粘贴图片自动上传<em>Ctrl+V 贴进来的截图直接存进正文</em></span>
+            <label class="sw"><input type="checkbox" id="set-pasteupload"><span></span></label>
+          </div>
+        </div>
+      </section>
+
+      <section class="set-sec" data-sec="brand">
+        <div class="set-group">
+          <div class="set-h">站名</div>
+          <div class="set-row">
+            <span class="set-l">站名<em>左导航栏上显示的名字</em></span>
+            <input class="set-input" id="set-brand" maxlength="24" placeholder="速笺">
+          </div>
+          <div class="set-row">
+            <span class="set-l">标签页标题<em>浏览器标签上写的字，留空就用站名</em></span>
+            <input class="set-input" id="set-tabtitle" maxlength="40" placeholder="速笺">
+          </div>
+        </div>
+        <div class="set-group">
+          <div class="set-h">图标</div>
+          <div class="set-row">
+            <span class="set-l">上传图片<em>方形 png / svg，同时用作登录页和浏览器图标</em></span>
+            <label class="upload-box">
+              <input type="file" id="set-logo-file" accept="image/*" hidden>
+              <span id="set-logo-preview"><img id="set-logo-img" alt="" hidden><em>选择图片</em></span>
+            </label>
+          </div>
+          <div class="set-row">
+            <span class="set-l">或用文字图标<em>不超过 3 个字时直接显示成图标</em></span>
+            <input class="set-input short" id="set-logo-text" maxlength="3" placeholder="su">
+          </div>
+        </div>
+        <div class="set-group">
+          <div class="set-h">访问</div>
+          <div class="set-row">
+            <span class="set-l">允许访客注册<em>后续版本开放</em></span>
+            <label class="sw disabled" title="本版本不允许访客注册"><input type="checkbox" id="set-guest" disabled><span></span></label>
+          </div>
+          <p class="set-note">这一版只认一个管理员账号：站点仅你自己可进。首次部署时若还没有账号，
+            登录页会引导你建一个，建完该入口永久关闭。访客注册留给后续版本。</p>
+        </div>
+      </section>
+
+      <section class="set-sec" data-sec="avatar">
+        <div class="set-group">
+          <div class="set-h">用户头像</div>
+          <div class="set-row">
+            <span class="set-l">头像图片<em>显示在账号按钮和登录页，建议正方形</em></span>
+            <label class="upload-box">
+              <input type="file" id="set-avatar-file" accept="image/*" hidden>
+              <span id="set-avatar-preview"><img id="set-avatar-img" alt="" hidden><em>选择图片</em></span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <section class="set-sec" data-sec="data">
+        <div class="set-group">
+          <div class="set-h">存储概览</div>
+          <div class="set-row"><span class="set-l">笔记<em id="data-notes">—</em></span></div>
+          <div class="set-row"><span class="set-l">附件<em id="data-assets">—</em></span></div>
+          <div class="set-row"><span class="set-l">历史版本<em id="data-history">—</em></span></div>
+          <div class="set-row"><span class="set-l">回收站<em id="data-trash">—</em></span></div>
+        </div>
+        <div class="set-group">
+          <div class="set-h">导出与备份</div>
+          <div class="set-row">
+            <span class="set-l">全部笔记<em>整站打包成一个 ZIP 下载（含插图）</em></span>
+            <button class="ghost sm" id="set-export-all">导出全部</button>
+          </div>
+          <p class="set-note">笔记就是磁盘上的 Markdown 文件，把 notes 目录整个拷走就是完整备份，
+            不用导出也一样安全。</p>
+        </div>
+      </section>
+
+      <section class="set-sec" data-sec="about">
+        <div class="set-group">
+          <div class="set-h">速笺 SuJot</div>
+          <div class="set-row"><span class="set-l">说明<em id="set-about">—</em></span></div>
+          <div class="set-row">
+            <span class="set-l">版本<em>测试版，功能随时可能调整</em></span>
+            <span class="set-ver-group">
+              <span class="set-ver" id="set-ver">v0.1.0</span>
+              <button class="ghost sm" id="set-update" title="检查有没有新版本">检查更新</button>
+            </span>
+          </div>
+        </div>
+        <div class="set-group">
+          <div class="set-h">开发者</div>
+          <div class="dev-card">
+            <div class="dev-top">
+              <img class="dev-avatar" id="dev-avatar" src="/dev-avatar-192.png?v=1"
+                   width="40" height="40" alt="Primerusse 的头像">
+              <div class="dev-meta">
+                <b>Primerusse</b>
+                <span>速笺的作者与维护者</span>
+              </div>
+            </div>
+            <a class="dev-github" id="set-github" href="https://github.com/Primerusse"
+               target="_blank" rel="noopener noreferrer" title="在 GitHub 上打开">
+              <svg viewBox="0 0 16 16" class="ico gh" aria-hidden="true">
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+                         0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13
+                         -.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66
+                         .07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15
+                         -.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27
+                         s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12
+                         .51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48
+                         0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8
+                         c0-4.42-3.58-8-8-8z"/>
+              </svg>
+              <span>GitHub</span>
+            </a>
+          </div>
+        </div>
+        <div class="set-group">
+          <div class="set-h">其他</div>
+          <div class="set-row">
+            <span class="set-l">快捷键<em>完整键位一览</em></span>
+            <button class="ghost sm" id="set-keys">查看</button>
+          </div>
+          <div class="set-row">
+            <span class="set-l">恢复默认设置<em>外观与行为全部回到出厂状态</em></span>
+            <button class="ghost sm" id="set-reset">恢复默认</button>
+          </div>
+        </div>
+      </section>
+
+        </div>
+      </div>
+    </aside>
+
+    <!-- 右侧内容 -->
+    <main class="content">
+      <div class="content-col">
+      <div class="toolbar">
+        <button class="tool" id="btn-save" title="保存文件 (Ctrl+S)">
+          <svg viewBox="0 0 16 16" class="ico"><path d="M3 2h8l2 2v10H3z"/><path d="M5.5 2v4h5V2M5.5 14v-4h5v4"/></svg><span>保存文件</span>
+        </button>
+        <button class="tool" id="btn-image" title="上传图片（也可以直接粘贴 / 拖进来）">
+          <svg viewBox="0 0 16 16" class="ico"><rect x="2" y="3" width="12" height="10" rx="1.5"/><circle cx="6" cy="6.5" r="1.2"/><path d="M3 12l3.6-3.6 2.4 2.4 2-2L14 12"/></svg><span>上传图片</span>
+        </button>
+        <span class="flex"></span>
+        <div class="seg-group">
+          <span class="seg-lab">浏览方式</span>
+          <div class="seg" role="tablist" id="seg-view">
+          <button role="tab" data-view="edit" title="只看编辑器">编<span class="w">辑</span></button>
+          <button role="tab" data-view="split" class="on" title="左右分栏（写一边看一边）">分<span class="w">栏</span></button>
+          <button role="tab" data-view="read" title="只看预览">预<span class="w">览</span></button>
+          </div>
+        </div>
+        <span class="tb-sep-v"></span>
+        <div class="seg-group">
+          <span class="seg-lab">大纲</span>
+          <div class="seg" role="group" id="seg-ol" aria-label="大纲显示或隐藏">
+            <button data-ol="1" title="显示右侧大纲（Ctrl+\）">显示</button>
+            <button data-ol="0" title="隐藏右侧大纲（Ctrl+\）">隐藏</button>
+          </div>
+        </div>
+        </div>
+      <div class="split" id="split">
+        <section class="pane pane-edit">
+          <div class="gutter-num" id="lineno" hidden aria-hidden="true"></div>
+          <div class="hl-layer" id="hl-layer" aria-hidden="true"><pre id="hl-code"><code></code></pre></div>
+          <textarea id="editor" spellcheck="false" placeholder="在这里写…&#10;&#10;支持 Markdown 与 LaTeX：$E=mc^2$，$$ \int_0^1 x^2\,dx $$"></textarea>
+        </section>
+        <div class="gutter" id="gutter" title="拖动调整比例"></div>
+        <section class="pane pane-read">
+          <article class="preview markdown" id="preview"></article>
+        </section>
+      </div>
+
+
+      <div class="statusbar">
+              <span id="st-path">—</span>
+              <span class="flex"></span>
+              <span id="save-state" data-s="idle">就绪</span>
+              <span class="dot">·</span>
+              <span id="st-words">0 字</span>
+              <span class="dot">·</span>
+              <span id="st-saved">—</span>
+            </div>
+      </div>   <!-- /.content-col -->
+
+
+      
+    </main>
+
+    <!-- 本篇大纲：与正文栏平级（.body 的子元素），这样两栏之间有缝 -->
+    <aside class="outline-panel" id="outline-panel">
+      <div class="ol-grip" id="ol-grip" title="拖动调整宽度（双击复位）"></div>
+      <div class="ol-head"><span>本篇大纲</span><span class="ol-n" id="ol-count"></span>
+      </div>
+      <div class="ol-list" id="outline-list"></div>
+      <p class="panel-hint" id="ol-empty" hidden>这一篇还没有标题层级。</p>
+    </aside>
+
+    <!-- 欢迎界面：点左上角 logo 或刚登录时出现，盖住文件栏 + 正文 + 大纲三栏 -->
+    <section class="welcome" id="welcome" hidden>
+      <div class="wc-card">
+        <header class="wc-head">
+          <img class="wc-logo" id="wc-logo" src="/sujot-logo-104.png?v=5" alt="">
+          <div class="wc-title">
+            <h1>速笺 <span class="en">SuJot</span></h1>
+            <p>一册私笺，只候一人　<span class="wc-ver" id="wc-ver">v0.1.0</span></p>
+          </div>
+        </header>
+
+
+        <section class="wc-sec">
+          <h2>最近打开</h2>
+          <div class="wc-recent" id="wc-recent"></div>
+        </section>
+
+        <section class="wc-sec">
+          <h2>能做什么</h2>
+          <ul class="wc-feats">
+            <li><b>Markdown + LaTeX</b>：标题、表格、代码块、公式，边写边见</li>
+            <li><b>三视图</b>：编辑 / 分栏 / 预览，源码与预览滚动锁定</li>
+            <li><b>不丢稿</b>：自动保存、历史版本、回收站、收藏夹</li>
+            <li><b>带得走</b>：单篇导出 <code>.md</code>，整站导出 <code>.zip</code>（连插图一起打包）</li>
+            <li><b>大纲联动</b>：右侧按标题成篇，滚到哪亮到哪</li>
+          </ul>
+        </section>
+
+        <footer class="wc-foot">
+          <span class="wc-foot-r" id="wc-count">—</span>
+        </footer>
+      </div>
+    </section>
+  </div>
+
+</div>
+
+<!-- 登录 -->
+<div id="gate" class="gate" hidden>
+  <form class="gate-card" id="login-form" autocomplete="on">
+    <div class="empty-logo"><img src="/sujot-logo.png?v=3" alt=""></div>
+    <h1>速笺 <span class="en">SuJot</span></h1>
+    <p class="muted" id="gate-tip">一册私笺，只候一人</p>
+    <label class="field">
+      <span>用户名</span>
+      <input type="text" id="user-name" autocomplete="username" placeholder="用户名" required>
+    </label>
+    <label class="field">
+      <span>密码</span>
+      <input type="password" id="pw" placeholder="••••••••" autocomplete="current-password" required>
+    </label>
+    <label class="remember"><input type="checkbox" id="remember" checked><span>记住我 · 三十天不必再敲门</span></label>
+    <button type="submit" class="accent">进入</button>
+    <p class="err" id="gate-err"></p>
+    <div class="reg-only" id="reg-only" hidden>
+      <p class="reg-tip">初次相见，先为自己立一个账号。<br>落锁之后，这道门便只认这一把钥匙。</p>
+      <label class="field"><span>用户名</span>
+        <input type="text" id="reg-user" autocomplete="username" placeholder="2-32 位，中英文均可"></label>
+      <label class="field"><span>密码（至少 8 位）</span>
+        <input type="password" id="reg-pw" autocomplete="new-password"></label>
+      <label class="field"><span>再输一次密码</span>
+        <input type="password" id="reg-pw2" autocomplete="new-password"></label>
+    </div>
+  </form>
+</div>
+
+<!-- 搜索面板 -->
+<div class="modal" id="search-overlay" hidden>
+  <div class="cmd">
+    <div class="cmd-input">
+      <svg viewBox="0 0 16 16" class="ico"><circle cx="7" cy="7" r="4.2"/><path d="M10.5 10.5L14 14"/></svg>
+      <input id="q" type="search" placeholder="搜索全部笔记…" autocomplete="off">
+      <kbd>Esc</kbd>
+    </div>
+    <div class="cmd-list" id="results"></div>
+  </div>
+</div>
+
+<!-- 重命名 / 历史 -->
+<div class="modal" id="prompt-overlay" hidden>
+  <form class="cmd narrow" id="prompt-form">
+    <div class="cmd-input"><input id="prompt-input" autocomplete="off"></div>
+    <div class="cmd-foot"><button type="button" class="ghost" id="prompt-cancel">取消</button><button type="submit" class="accent">确定</button></div>
+  </form>
+</div>
+
+
+<div class="modal" id="history-overlay" hidden>
+  <div class="cmd">
+    <div class="cmd-input"><span class="cmd-title">历史版本</span><kbd>Esc</kbd></div>
+    <div class="cmd-list" id="hist-list"></div>
+  </div>
+</div>
+
+<!-- 用户设置：头像、名称、密码 -->
+<div class="modal" id="acct-overlay" hidden>
+  <form class="cmd narrow" id="acct-form">
+    <div class="cmd-input"><span class="cmd-title">用户设置</span><kbd>Esc</kbd></div>
+    <p class="acct-must" id="acct-must" hidden>这是初始账号：请先把用户名和密码都改掉，保存后才能开始记笔记。</p>
+    <div class="cmd-body acct-body">
+      <div class="acct-avatar-row">
+        <span class="avatar big" id="acct-avatar">P</span>
+        <div class="acct-avatar-btns">
+          <button type="button" class="ghost sm" id="acct-pick">更换头像</button>
+          <button type="button" class="ghost sm" id="acct-clear">恢复默认头像</button>
+        </div>
+      </div>
+      <label class="field"><span>用户名</span>
+        <input type="text" id="acct-user" autocomplete="username" maxlength="32" placeholder="2-32 位，中英文均可">
+        <em class="hint">用户名既是登录名，也是界面上显示的名字；中英文均可，2-32 位。</em></label>
+      <hr class="acct-sep">
+      <label class="field"><span>当前密码</span>
+        <input type="password" id="acct-old" autocomplete="current-password" placeholder="改用户名或密码时填写"></label>
+      <label class="field"><span>新密码</span>
+        <input type="password" id="acct-new" autocomplete="new-password" minlength="6" placeholder="至少 6 位"></label>
+      <label class="field"><span>再输一次新密码</span>
+        <input type="password" id="acct-new2" autocomplete="new-password" minlength="6"></label>
+      <p class="err" id="acct-err"></p>
+    </div>
+    <div class="cmd-foot">
+      <button type="button" class="ghost" id="acct-cancel">取消</button>
+      <button type="submit" class="accent">保存</button>
+    </div>
+  </form>
+</div>
+<input type="file" id="acct-file" accept="image/*" hidden>
+
+
+<input type="file" id="file-input" accept="image/*" multiple hidden>
+
+
+
+
+<!-- 文件树 / 大纲 的右键菜单 -->
+<!-- 右键菜单：按「文件 / 文件夹 / 空白」三种目标给不同项，参照 Windows 资源管理器 -->
+<div class="ctxmenu" id="ctxmenu" hidden>
+
+  <!-- 空白处 -->
+  <div class="ctx-group" data-for="blank">
+  <button class="ctx-item" data-act="newdir"><svg viewBox="0 0 16 16" class="ico"><path d="M2 4.5h4l1.2 1.5H14v6.5H2z"/><path d="M8 6.5v3.5M6.2 8.2h3.6"/></svg><span>新建文件夹</span></button>
+  <button class="ctx-item" data-act="newdoc"><svg viewBox="0 0 16 16" class="ico"><path d="M8 3v10M3 8h10"/></svg><span>新建文件</span></button>
+  <button class="ctx-item" data-act="reload"><svg viewBox="0 0 16 16" class="ico"><path d="M13.5 8a5.5 5.5 0 1 1-1.7-4"/><path d="M13.6 2.4v3.2h-3.2"/></svg><span>重新载入文件目录</span></button>
+  </div>
+
+  <!-- 文件 -->
+  <div class="ctx-group" data-for="doc" hidden>
+  <button class="ctx-item star" data-act="fav"><svg viewBox="0 0 16 16" class="ico"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z"/></svg><span>收藏</span></button>
+  <button class="ctx-item" data-act="rename"><svg viewBox="0 0 16 16" class="ico"><path d="M11.5 2.5l2 2L5 13l-3 1 1-3z"/></svg><span>重命名</span></button>
+  <div class="ctx-sep"></div>
+  <button class="ctx-item" data-act="export"><svg viewBox="0 0 16 16" class="ico"><path d="M8 2v8M5 7l3 3 3-3M3 13h10"/></svg><span>导出为 Markdown 文件</span></button>
+  <button class="ctx-item" data-act="history"><svg viewBox="0 0 16 16" class="ico"><path d="M8 4.5V8l2.4 1.6"/><path d="M13.5 8a5.5 5.5 0 1 1-1.7-4"/><path d="M13.6 2.4v3.2h-3.2"/></svg><span>历史版本</span></button>
+  <div class="ctx-sep"></div>
+  <button class="ctx-item danger" data-act="delete"><svg viewBox="0 0 16 16" class="ico"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M5 4.5l.6 8h4.8l.6-8"/></svg><span>移动至回收站</span></button>
+  </div>
+
+  <!-- 文件夹 -->
+  <div class="ctx-group" data-for="dir" hidden>
+  <button class="ctx-item star" data-act="fav"><svg viewBox="0 0 16 16" class="ico"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z"/></svg><span>收藏</span></button>
+  <button class="ctx-item" data-act="rename"><svg viewBox="0 0 16 16" class="ico"><path d="M11.5 2.5l2 2L5 13l-3 1 1-3z"/></svg><span>重命名</span></button>
+  <div class="ctx-sep"></div>
+  <button class="ctx-item" data-act="newdir"><svg viewBox="0 0 16 16" class="ico"><path d="M2 4.5h4l1.2 1.5H14v6.5H2z"/><path d="M8 6.5v3.5M6.2 8.2h3.6"/></svg><span>新建子文件夹</span></button>
+  <button class="ctx-item" data-act="newdoc"><svg viewBox="0 0 16 16" class="ico"><path d="M8 3v10M3 8h10"/></svg><span>新建子文件</span></button>
+  <button class="ctx-item" data-act="zip"><svg viewBox="0 0 16 16" class="ico"><path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/><path d="M6.6 7h2.8M6.6 9h2.8M6.6 11h2.8"/></svg><span>导出为 ZIP 文件</span></button>
+  <div class="ctx-sep"></div>
+  <button class="ctx-item" data-act="history"><svg viewBox="0 0 16 16" class="ico"><path d="M8 4.5V8l2.4 1.6"/><path d="M13.5 8a5.5 5.5 0 1 1-1.7-4"/><path d="M13.6 2.4v3.2h-3.2"/></svg><span>历史版本</span></button>
+  <div class="ctx-sep"></div>
+  <button class="ctx-item danger" data-act="delete"><svg viewBox="0 0 16 16" class="ico"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M5 4.5l.6 8h4.8l.6-8"/></svg><span>移动至回收站</span></button>
+  </div>
+</div>
+
+
+
+<div class="modal" id="keys-overlay" hidden>
+  <div class="cmd narrow">
+    <div class="cmd-input"><span class="cmd-title">快捷键</span><kbd>Esc</kbd></div>
+    <div class="shortcuts">
+      <b><kbd>Ctrl</kbd><kbd>K</kbd></b><span>搜索全部笔记（↑↓ 挑选，回车翻开）</span>
+      <b><kbd>Ctrl</kbd><kbd>S</kbd></b><span>即刻存盘</span>
+      <b><kbd>Ctrl</kbd><kbd>⇧</kbd><kbd>S</kbd></b><span>导出本篇为 Markdown 文件</span>
+      <b><kbd>Ctrl</kbd><kbd>N</kbd></b><span>新铺一张纸</span>
+      <b><kbd>Ctrl</kbd><kbd>D</kbd></b><span>把这一篇收进收藏夹，再按一次放手</span>
+      <b><kbd>Ctrl</kbd><kbd>B</kbd></b><span>侧栏收起来，给正文腾地方</span>
+      <b><kbd>Ctrl</kbd><kbd>\</kbd></b><span>大纲显示或隐藏</span>
+      <b><kbd>?</kbd></b><span>唤出这个面板</span>
+      <b><kbd>Tab</kbd></b><span>编辑器里插入两个空格</span>
+      <b>粘贴图片</b><span>截图直接 Ctrl+V 贴进正文，自动上传</span>
+      <b>点标题</b><span>大纲里轻点一下，即到那一段</span>
+    </div>
+    <div class="cmd-foot"><button type="button" class="ghost" id="keys-close">知道了</button></div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="/vendor/katex/katex.min.js"></script>
+<script src="/app.js?v=119"></script>
+</body>
+</html>

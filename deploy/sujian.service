@@ -1,0 +1,23 @@
+[Unit]
+Description=速笺 SuJot 笔记服务
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/srv/sujian
+
+# 数据目录（笔记 / 历史版本 / 回收站 / 账号 / 站点配置都在这里）
+Environment=SUJIAN_BASE=/srv/sujian
+Environment=SUJIAN_PORT=8013
+
+ExecStart=/usr/bin/python3 /srv/sujian/server.py
+Restart=always
+RestartSec=2
+
+# 一个人用的服务，顺手把能收的都收起来
+MemoryMax=180M
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

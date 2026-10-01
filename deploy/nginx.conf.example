@@ -1,0 +1,37 @@
+# 速笺 SuJot —— nginx 反向代理示例
+#
+# 用法：把本文件拷到 /etc/nginx/sites-available/sujian，软链到 sites-enabled，
+# 把 sujot.example.com 换成自己的域名，然后：
+#
+#     sudo nginx -t && sudo systemctl reload nginx
+#     sudo certbot --nginx -d sujot.example.com        # 自动补上 443 段并跳转
+#
+# 这里【只写 HTTP】是有意的：证书还没申请时，配置文件里引用
+# /etc/letsencrypt/live/... 会让 `nginx -t` 直接失败。先跑通 80 端口，
+# 再由 certbot 把 TLS 和 80→443 跳转自动加上去，这是最不容易卡住的顺序。
+#
+# 后端只监听 127.0.0.1:8013（见 sujian.service 里的 SUJIAN_PORT），
+# 不直接对外，HTTPS 与域名都交给 nginx。
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name sujot.example.com;
+
+    client_max_body_size 16m;                 # 允许粘贴大图
+
+    location /.well-known/acme-challenge/ { root /var/www/html; }
+
+    location / {
+        proxy_pass http://127.0.0.1:8013;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+    }
+}
+
+# certbot --nginx 跑完之后，上面这段会被自动改写成带 ssl 的 443 段，
+# 并额外生成一个 80 → 443 的跳转 server 块。别手改，交给 certbot。

@@ -1,0 +1,26 @@
+没找到可用的 Python —— 速笺需要 Python 3.8 或更新版本。
+
+怎么办：
+
+  1. 打开  https://www.python.org/downloads/windows/
+     浏览器应该已经自动跳到这个页面了。
+
+  2. 下载「Windows installer (64-bit)」，双击安装。
+
+  3. 安装界面的第一屏，最下面有一个勾选框：
+         [ ] Add python.exe to PATH
+     务必把它勾上，再点 Install Now。
+
+  4. 装完之后，关掉这个窗口，重新双击 start_run_locally.cmd。
+
+另外一种情况：你的浏览器跳到了「微软商店的 Python 页面」，
+那说明机器上只有商店里的占位符 python，不是真的 Python。
+这时请按上面步骤装一次官方版；如果之后还跳商店，
+去「设置 → 应用 → 高级应用设置 → 应用执行别名」，
+把 python.exe 和 python3.exe 这两个开关关掉。
+
+装好了想确认一下，可以按 Win+R 输入 cmd 回车，然后输入：
+
+      python -V
+
+能打出 3.8 以上的版本号就算成功。

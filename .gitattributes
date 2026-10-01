@@ -1,0 +1,18 @@
+# 行尾交给 git 管：Windows 上的批处理必须是 CRLF，否则 cmd.exe 会解析错
+# （典型症状：双击 start_run_locally.cmd 一闪就关）。其余文本一律 LF。
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.txt text eol=crlf
+
+# 二进制，别做任何转换
+*.png binary
+*.jpg binary
+*.webp binary
+*.ico binary
+*.woff2 binary
+*.woff binary
+*.ttf binary
+*.otf binary
+*.zip binary
