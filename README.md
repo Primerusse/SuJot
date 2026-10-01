@@ -22,10 +22,6 @@ A minimal, self-hosted Markdown notebook.
 
 ---
 
-> 📄 **完整文档**（拿到手、界面截图、特性、快捷键、部署到服务器、配置、数据、项目结构、设计取舍、自检、安全、常见问题）见 **[document.md](document.md)**
-
----
-
 <a id="intro"></a>
 ## 📖 简介 · Introduction
 
@@ -53,9 +49,6 @@ Markdown 是唯一正文数据源，前端没有 Node 工具链，没有任何�
 **它不适合你，如果：** 需要多人协作、需要手机 App、需要端到端加密同步、
 需要导出成各种格式。速笺有意不做这些（见[设计取舍](document.md#design)）。
 
-
----
-
 ---
 
 <a id="quickstart"></a>
@@ -65,7 +58,7 @@ Markdown 是唯一正文数据源，前端没有 Node 工具链，没有任何�
 
 **Windows**
 
-1. 到 <https://www.python.org/downloads/> 下安装包，装的时候**勾上「Add Python to PATH」**
+1. Python环境。到 <https://www.python.org/downloads/> 下安装包，装的时候**勾上「Add Python to PATH」**
 2. 解压发布包，**双击 `start_run_locally.cmd`**
 3. 浏览器打开 <http://127.0.0.1:8013>
 
@@ -74,7 +67,8 @@ Markdown 是唯一正文数据源，前端没有 Node 工具链，没有任何�
 ```bash
 git clone https://github.com/Primerusse/SuJot.git
 cd 你解压出来的目录
-./start_run_locally.sh            # 会先检查 Python 版本、准备数据目录（不联网、不装东西）→ http://127.0.0.1:8013
+./start_run_locally.sh 
+# 会先检查 Python 版本、准备数据目录（不联网、不装东西）→ http://127.0.0.1:8013
 ```
 
 数据会自动落在项目旁边的 `data/`（Windows 是 `data\`），不写任何系统目录；
@@ -89,10 +83,13 @@ cd 你解压出来的目录
 
 ---
 
+## 📄 文档
+
+详见 **[document.md](document.md)**
+
 ---
 
 ## 👤 关于作者 · Author
-
 **Primerusse**
 *   学历(Education)：在读本科 (Undergraduate Student)
 *   个人博客(Blog)：[primerusse.top](https://primerusse.top)
