@@ -1,6 +1,5 @@
 # 运行时数据：笔记正文、历史版本、回收站、账号与站点配置，一律不进仓库
 notes/
-data/          # 本地试跑时自动生成的数据目录（服务器上用 /srv/sujian）
 .history/
 .trash/
 users.json

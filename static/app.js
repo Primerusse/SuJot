@@ -171,13 +171,72 @@ function flushKatex() {
   Array.prototype.slice.call(el.preview.querySelectorAll('.katex-slot')).forEach(renderSlot);
 }
 
+/* 笔记里历史遗留的原生 HTML（Word 导出的表格、旧站写下的 `<div align="center">`）——
+   放行一个白名单子集，白名单之外的标签仍旧转义成纯文本，绝不放脚本/事件/外部 URL 进来。 */
+const HTML_OK = {
+  div: ['align'], p: ['align'], center: [], figure: [], section: [], details: [], summary: [],
+  strong: [], b: [], em: [], i: [], u: [], s: [], del: [], mark: [], small: [], span: [],
+  sup: [], sub: [], code: [], pre: [], br: [], hr: [], ul: [], ol: [], li: [],
+  table: [], thead: [], tbody: [], tfoot: [], caption: [], tr: [],
+  td: ['align', 'colspan', 'rowspan', 'width'], th: ['align', 'colspan', 'rowspan', 'width']
+};
+/* 只有这些块级标签才会被当成「整块 HTML」处理（其余保持行内） */
+const HTML_BLOCK = /^<\s*(table|div|p|center|figure|section|details|blockquote)\b/i;
+const HTML_BLOCK_TAG = /<\s*(\/?)\s*(table|div|p|center|figure|section|details|blockquote)\b[^>]*>/gi;
+
+/** 单个标签 → 清洗后的标签；不在白名单里返回 null（调用方按纯文本转义） */
+function rawTag(tag) {
+  const m = String(tag).match(/^<\s*(\/?)\s*([a-zA-Z][\w-]*)((?:"[^"]*"|'[^']*'|[^>"'])*?)\s*(\/?)\s*>$/);
+  if (!m) return null;
+  const close = m[1], name = m[2].toLowerCase(), attrs = m[3] || '';
+  if (!Object.prototype.hasOwnProperty.call(HTML_OK, name)) return null;
+  const keep = [];
+  const re = /([a-zA-Z_:][-\w:.]*)\s*(?:=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
+  let a;
+  while ((a = re.exec(attrs))) {
+    const nm = a[1].toLowerCase();
+    const val = a[2] !== undefined ? a[2] : a[3] !== undefined ? a[3] : a[4] !== undefined ? a[4] : '';
+    if (HTML_OK[name].indexOf(nm) < 0) continue;
+    if (/^on/i.test(nm)) continue;
+    if (/^\s*(javascript|vbscript|data):/i.test(val)) continue;
+    if (nm === 'align' && !/^(left|center|right|justify)$/i.test(val)) continue;
+    if (nm === 'width' && !/^\d{1,3}(%|px)?$/.test(val)) continue;
+    if ((nm === 'colspan' || nm === 'rowspan') && !/^\d{1,3}$/.test(val)) continue;
+    keep.push(nm + '="' + esc(val) + '"');
+  }
+  const voidTag = /^(br|hr)$/.test(name);
+  return '<' + close + name + (keep.length ? ' ' + keep.join(' ') : '') + (!close && voidTag ? ' /' : '') + '>';
+}
+
+/** 一整块 HTML：标签走白名单，标签之间的文字照旧走行内解析（加粗、公式、图片都在里面） */
+function htmlBlock(src) {
+  const re = /<\/?[a-zA-Z][^>]*>/g;
+  let out = '', last = 0, m;
+  while ((m = re.exec(src))) {
+    if (m.index > last) out += inline(src.slice(last, m.index));
+    const t = rawTag(m[0]);
+    out += t === null ? esc(m[0]) : t;
+    last = re.lastIndex;
+  }
+  return out + inline(src.slice(last));
+}
+
 function inline(text) {
-  const stash = [];
-  let s = String(text).replace(/\$\$[\s\S]+?\$\$|\$[^$\n]+?\$/g, m => {
+  const stash = [], keep = [], code = [];
+  // 行内代码先摘出来：反引号里的 $...$、<div> 都该按字面显示（老写法是后摘，会把代码里的 $…$ 当公式渲染）
+  let s = String(text).replace(/`([^`\n]+)`/g, (m, a) => {
+    code.push('<code>' + esc(a) + '</code>'); return '\u0002' + (code.length - 1) + '\u0002';
+  });
+  s = s.replace(/\$\$[\s\S]+?\$\$|\$[^$\n]+?\$/g, m => {
     stash.push(m); return '\u0000' + (stash.length - 1) + '\u0000';
   });
+  s = s.replace(/<\/?[a-zA-Z][^>]*>/g, m => {          // 白名单 HTML 先摘出来，免得被转义
+    const t = rawTag(m);
+    if (t === null) return m;
+    keep.push(t); return '\u0001' + (keep.length - 1) + '\u0001';
+  });
   s = esc(s);
-  s = s.replace(/`([^`\n]+)`/g, (m, a) => '<code>' + a + '</code>');
+  s = s.replace(/&amp;(#\d{2,6}|[a-zA-Z][a-zA-Z0-9]{1,9});/g, '&$1;');   // 笔记里写的 HTML 实体保留
   s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
   s = s.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
   s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g,
@@ -185,9 +244,13 @@ function inline(text) {
   s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g,
     (m, t, href) => '<a href="' + attrUrl(href) + '" target="_blank" rel="noopener">' + t + '</a>');
   s = s.replace(/(^|[\s（(])\*([^*\n]+?)\*(?=[\s）。，,.!?;:]|$)/g, '$1<em>$2</em>');
+  s = s.replace(/\u0002(\d+)\u0002/g, (m, i) => code[+i]);
+  s = s.replace(/\u0001(\d+)\u0001/g, (m, i) => keep[+i]);
   s = s.replace(/\u0000(\d+)\u0000/g, (m, i) => mathHtml(stash[+i]));
   return s;
 }
+
+const IMG_VER = new Map();      // 相对路径 → 保存后的 mtime，用来破图片缓存
 
 function attrUrl(u) {
   if (/^(https?:|mailto:|data:|#)/i.test(u)) return esc(u);
@@ -200,7 +263,8 @@ function attrUrl(u) {
       path = (dir ? dir + '/' : '') + decodeURI(u.replace(/^\.\//, ''));
     }
   } catch (e) { path = u; }
-  return esc('/api/raw?path=' + encodeURIComponent(path));
+  const v = IMG_VER.get(path);
+  return esc('/api/raw?path=' + encodeURIComponent(path) + (v ? '&v=' + v : ''));
 }
 
 const LIST_RE = /^(\s*)([-*+]|\d{1,3}[.)])\s+(.*)$/;
@@ -339,6 +403,22 @@ function mdBody(src) {
     if (/^\s*<!--/.test(line)) {
       while (i < lines.length && !/-->/.test(lines[i])) i++;
       i++; continue;
+    }
+
+    // 整块 HTML（白名单）：按原样输出，不再包一层 <p>
+    if (HTML_BLOCK.test(line)) {
+      const buf = [];
+      let depth = 0;
+      do {
+        const l = lines[i];
+        buf.push(l);
+        HTML_BLOCK_TAG.lastIndex = 0;
+        let t;
+        while ((t = HTML_BLOCK_TAG.exec(l))) depth += t[1] ? -1 : 1;
+        i++;
+      } while (i < lines.length && depth > 0);
+      out += htmlBlock(buf.join('\n'));
+      continue;
     }
 
     // 段落
@@ -945,6 +1025,13 @@ function wireCtxMenu() {
     if (act === 'fav') { if (!path) return toast('先选中一项'); toast(toggleFav(path) ? '已收藏' : '已取消收藏'); return; }
     if (act === 'rename') doRename(path);
     else if (act === 'export') doExportMd(path);
+    else if (act === 'media') openMedia(ctxKind === 'doc' ? path : S.current);
+    else if (act === 'imgedit' || act === 'imglib') {
+      const ip = imgPathFromSrc(ctxImgSrc);
+      if (!ip) return toast('这张图不在笔记库的媒体目录里，没法这样编辑');
+      openMedia(S.current, ip, { edit: act === 'imgedit', from: act === 'imgedit' ? 'preview' : 'preview-lib' });
+    }
+    else if (act === 'imgnew') { try { window.open(ctxImgSrc, '_blank', 'noopener'); } catch (e) {} }
     else if (act === 'history') { if (ctxKind === 'dir') toast('文件夹本身没有历史版本，请对单篇笔记使用'); else doHistory(path); }
     else if (act === 'delete') doDelete(path);
     else if (act === 'newdir') doNewDir(ctxDir || '');
@@ -2154,6 +2241,14 @@ bindEl('#btn-image', 'click', () => $('#file-input').click());
   // 预览里点图片放大
   el.preview.addEventListener('click', e => { const img = e.target.closest('img'); if (img) { e.preventDefault(); openLightbox(img.getAttribute('src'), img.getAttribute('alt') || ''); }
   });
+  // 预览里右键图片：编辑 / 在媒体库中显示
+  el.preview.addEventListener('contextmenu', e => {
+    const img = e.target.closest('img');
+    if (!img) return;
+    e.preventDefault();
+    ctxImgSrc = img.getAttribute('src') || '';
+    openCtx(e.clientX, e.clientY, S.current, 'img');
+  });
   // 预览里点别的笔记名 → 直接打开那篇
   el.preview.addEventListener('click', e => { const a = e.target.closest('a.note-link'); if (a) { e.preventDefault(); openDoc(a.dataset.note); }
   });
@@ -2227,7 +2322,7 @@ bindEl('#btn-image', 'click', () => $('#file-input').click());
   }); addEventListener('beforeunload', e => { if (S.dirty) { e.preventDefault(); e.returnValue = ''; } }); window.__bindMs = Math.round(performance.now() - window.__t);
 }
 
-async function uploadImage(file) {
+async function uploadImage(file, doc) {
   const name = file.name || ('粘贴图-' + Date.now() + '.png');
   const data = await new Promise((res, rej) => {
     const fr = new FileReader();
@@ -2235,7 +2330,7 @@ async function uploadImage(file) {
     fr.onerror = () => rej(new Error('读取图片失败'));
     fr.readAsDataURL(file);
   });
-  const r = await post('/api/upload', { name, data });
+  const r = await post('/api/upload', { name, data, doc: doc || S.current || '' });
   return r.name;
 }
 
@@ -2256,10 +2351,13 @@ async function handleFiles(files) {
   if (!imgs.length) return;
   toast('上传中…（' + imgs.length + ' 张）');
   const lines = [];
+  const dirName = S.current ? mediaDirName(S.current) : '';
   for (const f of imgs) {
     try {
-      const name = await uploadImage(f);
-      lines.push('![' + name + '](/assets/' + encodeURIComponent(name) + ')');
+      const name = await uploadImage(f, S.current);
+      // 存进本篇笔记自己的媒体目录，正文里写相对路径
+      const ref = dirName ? dirName + '/' + name : name;
+      lines.push('![' + name + '](' + encodeURI(ref) + ')');
     } catch (e) { toast('上传失败：' + e.message); }
   }
   if (lines.length) {
@@ -2267,6 +2365,1238 @@ async function handleFiles(files) {
     toast('已插入 ' + lines.length + ' 张图');
   }
 }
+
+/* ══ 媒体库（每篇笔记一个 <笔记名>.assets/）═════════════════════
+   入口：① 文件栏右键「打开媒体库」 ② 预览里右键图片「在媒体库中显示 / 编辑图片」。
+   点开一张先看大图（查看模式：上一张 / 下一张 / 编辑），进编辑再改：
+   左转、右转、水平翻转、垂直翻转、裁剪、透视矫正（自动识别，失败转手动四点）、撤销、还原。
+   全部在浏览器里用 canvas 做，后端只负责读写文件。 */
+const MEDIA = { doc: '', dir: '', items: [], idx: -1, from: 'tree' };
+const MED = { img: null, orig: null, rot: 0, fh: false, fv: false, crop: null, path: '',
+              name: '', mtime: 0, hist: [], cropMode: false, mode: 'view' };
+let MEDIA_EL = null;
+let ctxImgSrc = '';
+let QUAD = null;        // 手动透视的四个角（0~1 的比例坐标）
+let PERSP = null;       // {prev:{img,rot,fh,fv}} 进手动透视前的状态
+let PERSP_TRIED = false; // 自动没认出纸边时，第二次点击才进手动
+
+/** 笔记路径 → 它的媒体目录名（不含上级路径） */
+function mediaDirName(doc) {
+  const parts = (doc || '').split('/');
+  const file = parts.pop() || '';
+  return file.replace(/\.(md|markdown|txt)$/i, '') + '.assets';
+}
+
+/** 从 /api/raw?path=… 里取回相对路径 */
+function imgPathFromSrc(src) {
+  const m = (src || '').match(/[?&]path=([^&]+)/);
+  if (!m) return '';
+  try { return decodeURIComponent(m[1]); } catch (e) { return ''; }
+}
+
+function mediaTitle(doc) {
+  const n = S.byPath.get(doc) || {};
+  return n.title || (doc || '').split('/').pop().replace(/\.(md|markdown|txt)$/i, '');
+}
+
+function ensureMediaEl() {
+  if (MEDIA_EL) return MEDIA_EL;
+  const d = document.createElement('div');
+  d.className = 'media-lib';
+  d.hidden = true;
+  d.innerHTML =
+    '<div class="ml-shell">' +
+      '<div class="ml-head">' +
+        '<div class="ml-title">媒体库</div>' +
+        '<span class="ml-chip"><span class="ml-dir"></span></span>' +
+        '<span class="flex"></span>' +
+        '<button class="ml-btn" data-mact="upload">上传图片</button>' +
+        '<button class="ml-x" data-mact="close" title="关闭（Esc）">✕</button>' +
+      '</div>' +
+      '<div class="ml-bar ml-gridbar">' +
+        '<span class="ml-hint">点一张先看大图，右上角有「上一张 / 下一张 / 编辑」</span>' +
+        '<span class="flex"></span><span class="ml-count"></span>' +
+      '</div>' +
+      '<div class="ml-body">' +
+        '<div class="ml-grid"></div>' +
+        '<div class="ml-view" hidden>' +
+          '<div class="ml-bar ml-viewbar">' +
+            '<span class="ml-name"></span>' +
+            '<span class="flex"></span>' +
+            '<button class="ml-btn" data-mact="prev">‹ 上一张</button>' +
+            '<button class="ml-btn" data-mact="next">下一张 ›</button>' +
+            '<button class="ml-btn primary" data-mact="edit">编辑</button>' +
+          '</div>' +
+          '<div class="ml-bar ml-editbar" hidden>' +
+            '<button class="ml-btn" data-mact="left" title="逆时针 90°">↺ 左转</button>' +
+            '<button class="ml-btn" data-mact="right" title="顺时针 90°">↻ 右转</button>' +
+            '<button class="ml-btn" data-mact="fhh" title="左右镜像">⇋ 水平翻转</button>' +
+            '<button class="ml-btn" data-mact="fvv" title="上下镜像">⇅ 垂直翻转</button>' +
+            '<button class="ml-btn" data-mact="crop" title="在图上拖一个框">▣ 裁剪</button>' +
+            '<button class="ml-btn" data-mact="persp" title="自动识别纸面，识别不到就手动拖四角">⬚ 透视矫正</button>' +
+            '<button class="ml-btn" data-mact="undo" title="撤销上一步">↶ 撤销</button>' +
+            '<button class="ml-btn" data-mact="reset" title="回到刚打开时的样子">⟲ 还原</button>' +
+            '<span class="flex"></span>' +
+            '<button class="ml-btn primary" data-mact="save">保存</button>' +
+            '<button class="ml-btn" data-mact="done">完成</button>' +
+          '</div>' +
+          '<div class="ml-canvas-wrap"><div class="ml-canvas-inner">' +
+            '<canvas id="ml-canvas"></canvas>' +
+            '<div class="ml-crop" hidden></div>' +
+            '<div class="ml-quad" hidden>' +
+              '<svg class="ml-qline" viewBox="0 0 100 100" preserveAspectRatio="none"><polygon points=""/></svg>' +
+              '<span class="ml-qh" data-q="0"></span><span class="ml-qh" data-q="1"></span>' +
+              '<span class="ml-qh" data-q="2"></span><span class="ml-qh" data-q="3"></span>' +
+            '</div>' +
+          '</div></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="ml-meta"></div>' +
+    '</div>' +
+    '<input type="file" class="ml-file" accept="image/*" multiple hidden>';
+  document.body.appendChild(d);
+
+  const wrap = d.querySelector('.ml-canvas-wrap');
+  let drag = null;
+
+  /* 裁剪：在画布上拖一个框，松手即裁 */
+  wrap.addEventListener('pointerdown', e => {
+    if (!MED.cropMode) return;
+    const cv = d.querySelector('#ml-canvas').getBoundingClientRect();
+    drag = { x0: e.clientX - cv.left, y0: e.clientY - cv.top, cv };
+    try { wrap.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  wrap.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const cv = drag.cv;
+    const x = Math.min(Math.max(e.clientX - cv.left, 0), cv.width);
+    const y = Math.min(Math.max(e.clientY - cv.top, 0), cv.height);
+    const box = d.querySelector('.ml-crop');
+    box.hidden = false;
+    box.style.left = Math.min(drag.x0, x) + 'px';
+    box.style.top = Math.min(drag.y0, y) + 'px';
+    box.style.width = Math.abs(x - drag.x0) + 'px';
+    box.style.height = Math.abs(y - drag.y0) + 'px';
+    drag.cx = x; drag.cy = y;
+  });
+  wrap.addEventListener('pointerup', () => {
+    if (!drag) return;
+    const s = drag; drag = null;
+    d.querySelector('.ml-crop').hidden = true;
+    if (s.cx === undefined) return;
+    mediaApplyCrop(s.x0, s.y0, s.cx - s.x0, s.cy - s.y0);
+  });
+
+  /* 手动透视：拖四个角 */
+  const quadEl = d.querySelector('.ml-quad');
+  let qdrag = null;
+  quadEl.addEventListener('pointerdown', e => {
+    const hd = e.target.closest('.ml-qh');
+    if (!hd || !QUAD) return;
+    e.preventDefault(); e.stopPropagation();
+    qdrag = +hd.dataset.q;
+    try { hd.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  quadEl.addEventListener('pointermove', e => {
+    if (qdrag === null || !QUAD) return;
+    const cv = d.querySelector('#ml-canvas').getBoundingClientRect();
+    const fx = Math.min(1, Math.max(0, (e.clientX - cv.left) / cv.width));
+    const fy = Math.min(1, Math.max(0, (e.clientY - cv.top) / cv.height));
+    QUAD[qdrag] = [fx, fy];
+    drawQuad();
+  });
+  quadEl.addEventListener('pointerup', () => { qdrag = null; });
+  quadEl.addEventListener('pointercancel', () => { qdrag = null; });
+
+  d.addEventListener('change', () => {});
+  d.querySelector('.ml-file').addEventListener('change', async () => {
+    const inp = d.querySelector('.ml-file');
+    const files = Array.from(inp.files || []);
+    inp.value = '';
+    for (const f of files) {
+      try {
+        await post('/api/upload', { name: f.name, data: await fileToB64(f), doc: MEDIA.doc });
+      } catch (e) { toast('上传失败：' + (e.message || '未知错误')); }
+    }
+    if (files.length) { toast('已上传 ' + files.length + ' 张'); await reloadMedia(); }
+  });
+
+  d.addEventListener('click', async e => {
+    const th = e.target.closest('.ml-thumb');
+    if (th) { await mediaOpenIdx(+th.dataset.i); return; }
+    const b = e.target.closest('[data-mact]');
+    if (!b) return;
+    const act = b.dataset.mact;
+    if (act === 'close') return closeMedia();
+    if (act === 'upload') { d.querySelector('.ml-file').click(); return; }
+    if (act === 'back') return showMediaGrid();
+    if (act === 'done') return setMediaMode('view');
+    if (act === 'edit') return setMediaMode('edit');
+    if (act === 'prev') return mediaStep(-1);
+    if (act === 'next') return mediaStep(1);
+    if (act === 'left' || act === 'right' || act === 'fhh' || act === 'fvv') {
+      if (PERSP) exitPersp();          // 透视中改朝向，四边形就对不上了，先退出
+      const before = mediaSnapshot();  // 撤销要退回改之前，所以先存一份
+      if (act === 'left')  MED.rot = (MED.rot + 270) % 360;
+      if (act === 'right') MED.rot = (MED.rot + 90) % 360;
+      if (act === 'fhh')   MED.fh = !MED.fh;
+      if (act === 'fvv')   MED.fv = !MED.fv;
+      mediaDirty(before);
+      return;
+    }
+    if (act === 'crop') {
+      if (PERSP) exitPersp();
+      MED.cropMode = !MED.cropMode;
+      b.classList.toggle('on', MED.cropMode);
+      wrap.classList.toggle('cropping', MED.cropMode);
+      if (!MED.cropMode) d.querySelector('.ml-crop').hidden = true;
+      return;
+    }
+    if (act === 'persp') return autoPersp();
+    if (act === 'perspapply') return applyPersp();
+    if (act === 'perspcancel') return exitPersp();
+    if (act === 'undo') return mediaUndo();
+    if (act === 'reset') return mediaReset();
+    if (act === 'save') return mediaSave();
+  });
+
+  addEventListener('keydown', e => {
+    if (d.hidden) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (PERSP) return exitPersp();
+      if (MED.mode === 'edit') return setMediaMode('view');
+      if (!d.querySelector('.ml-view').hidden) return showMediaGrid();
+      return closeMedia();
+    }
+    if (e.key === 'ArrowLeft') { if (MED.mode === 'view') { e.preventDefault(); mediaStep(-1); } }
+    if (e.key === 'ArrowRight') { if (MED.mode === 'view') { e.preventDefault(); mediaStep(1); } }
+  });
+  MEDIA_EL = d;
+  return d;
+}
+
+async function openMedia(doc, focusPath, opts) {
+  opts = opts || {};
+  const d0 = doc || S.current;
+  if (!d0) return toast('先打开一篇笔记');
+  let data;
+  try { data = await api('/api/media?doc=' + encodeURIComponent(d0)); }
+  catch (e) { return toast('媒体库打不开：' + (e.message || '未知错误')); }
+  MEDIA.doc = d0;
+  MEDIA.dir = data.dir;
+  MEDIA.from = opts.from || (opts.edit ? 'preview' : 'tree');
+  MEDIA.items = data.items || [];
+  MEDIA.idx = -1;
+  const box = ensureMediaEl();
+  box.hidden = false;
+  box.querySelector('.ml-title').textContent = '媒体库 · ' + mediaTitle(d0);
+  box.querySelector('.ml-dir').textContent = (data.dir || '') + '　·　' + MEDIA.items.length + ' 张';
+  renderMediaGrid();
+  if (focusPath) {
+    const i = MEDIA.items.findIndex(x => x.path === focusPath);
+    if (i >= 0) { MEDIA.idx = i; await mediaShow(i, opts.edit ? 'edit' : 'view'); }
+    else await mediaOpenFile({ path: focusPath, name: focusPath.split('/').pop(), mtime: 0,
+                               url: '/api/raw?path=' + encodeURIComponent(focusPath) }, true,
+                             opts.edit ? 'edit' : 'view');
+  } else if (opts.edit) { await mediaShow(0, 'edit'); }
+  else showMediaGrid();
+}
+
+async function reloadMedia() {
+  if (!MEDIA.doc) return;
+  try {
+    const data = await api('/api/media?doc=' + encodeURIComponent(MEDIA.doc));
+    MEDIA.items = data.items || [];
+    MEDIA.dir = data.dir;
+    const box = MEDIA_EL;
+    if (box) {
+      box.querySelector('.ml-dir').textContent = (data.dir || '') + '　·　' + MEDIA.items.length + ' 张';
+      renderMediaGrid();
+    }
+  } catch (e) { /* 保持原样 */ }
+}
+
+function closeMedia() {
+  if (PERSP) { try { exitPersp(); } catch (e) {} }
+  if (MEDIA_EL) { MEDIA_EL.hidden = true; MEDIA_EL.querySelector('.ml-view').hidden = true; }
+  MED.cropMode = false;
+}
+
+function showMediaGrid() {
+  const box = MEDIA_EL;
+  if (!box) return;
+  if (PERSP) exitPersp();
+  box.querySelector('.ml-view').hidden = true;
+  box.querySelector('.ml-grid').hidden = false;
+  box.querySelector('.ml-gridbar').hidden = false;
+  MED.cropMode = false;
+  const c = box.querySelector('[data-mact="crop"]');
+  if (c) c.classList.remove('on');
+  renderMediaGrid();
+}
+
+function renderMediaGrid() {
+  const box = MEDIA_EL;
+  if (!box) return;
+  const grid = box.querySelector('.ml-grid');
+  grid.hidden = false;
+  box.querySelector('.ml-view').hidden = true;
+  box.querySelector('.ml-gridbar').hidden = false;
+  const total = MEDIA.items.reduce((a, b) => a + (b.size || 0), 0);
+  const cnt = box.querySelector('.ml-count');
+  if (cnt) cnt.textContent = MEDIA.items.length + ' 张';
+  const meta = box.querySelector('.ml-meta');
+  if (meta) meta.textContent = MEDIA.items.length + ' 张　·　' + fmtSize(total);
+  if (!MEDIA.items.length) {
+    grid.innerHTML = '<div class="ml-empty">这篇笔记的媒体目录还是空的。<br>' +
+      '点右上角「上传图片」，或在正文里粘贴 / 拖入图片，图就会落到 <code>' +
+      esc(MEDIA.dir || '') + '</code>。</div>';
+    return;
+  }
+  grid.innerHTML = MEDIA.items.map((it, i) =>
+    '<button class="ml-thumb" data-i="' + i + '" title="' + esc(it.name) + '">' +
+      '<img src="' + esc(it.url + '&v=' + (it.mtime || 0)) + '" alt="" loading="lazy">' +
+      '<span>' + esc(it.name) + '</span>' +
+    '</button>').join('');
+}
+
+async function mediaOpenIdx(i) {
+  const it = MEDIA.items[i];
+  if (!it) return;
+  MEDIA.idx = i;
+  await mediaShow(i, 'view');
+}
+
+/** 打开第 i 张；mode = 'view'（看大图）或 'edit'（进编辑器） */
+async function mediaShow(i, mode) {
+  const it = MEDIA.items[i];
+  if (!it) return;
+  MEDIA.idx = i;
+  await mediaOpenFile(it, false, mode || 'view');
+}
+
+function loadImage(url) {
+  return new Promise((res, rej) => {
+    const im = new Image();
+    im.onload = () => res(im);
+    im.onerror = () => rej(new Error('图片加载失败'));
+    im.src = url;
+  });
+}
+
+async function mediaOpenFile(rec, foreign, mode) {
+  const box = ensureMediaEl();
+  box.querySelector('.ml-grid').hidden = true;
+  box.querySelector('.ml-view').hidden = false;
+  box.querySelector('.ml-gridbar').hidden = true;
+  MED.path = rec.path; MED.name = rec.name; MED.mtime = rec.mtime || 0;
+  MED.rot = 0; MED.fh = false; MED.fv = false; MED.crop = null; MED.hist = [];
+  PERSP_TRIED = false;
+  MED.cropMode = false; MED.foreign = !!foreign;
+  PERSP = null; QUAD = null;
+  box.querySelector('.ml-quad').hidden = true;
+  box.querySelector('[data-mact="crop"]').classList.remove('on');
+  box.querySelector('.ml-canvas-wrap').classList.remove('cropping');
+  box.querySelector('.ml-crop').hidden = true;
+  box.querySelector('.ml-meta').textContent = '载入中…';
+  try {
+    MED.img = await loadImage(rec.url + (rec.url.includes('?') ? '&' : '?') + 'v=' + (rec.mtime || 0));
+  } catch (e) { box.querySelector('.ml-meta').textContent = '这张图打不开：' + e.message; return; }
+  MED.orig = mediaSnapshot();
+  setMediaMode(mode || 'view');
+}
+
+function setMediaMode(mode) {
+  const box = MEDIA_EL;
+  if (!box || !MED.img) return;
+  if (PERSP) exitPersp();
+  MED.mode = mode === 'edit' ? 'edit' : 'view';
+  const editing = MED.mode === 'edit';
+  box.querySelector('.ml-viewbar').hidden = editing;
+  box.querySelector('.ml-editbar').hidden = !editing;
+  box.querySelector('.ml-name').textContent = MED.name;
+  box.querySelector('.ml-crop').hidden = true;
+  box.querySelector('.ml-quad').hidden = true;
+  MED.cropMode = false;
+  box.querySelector('[data-mact="crop"]').classList.remove('on');
+  box.querySelector('.ml-canvas-wrap').classList.remove('cropping');
+  mediaDraw();
+}
+
+function mediaSnapshot() {
+  return { img: MED.img, rot: MED.rot, fh: MED.fh, fv: MED.fv };
+}
+
+function mediaRestore(s) {
+  MED.img = s.img; MED.rot = s.rot; MED.fh = s.fh; MED.fv = s.fv;
+}
+
+function mediaDirty(before) {
+  if (before) MED.hist.push(before);
+  mediaDraw();
+}
+
+/** 撤销：退回上一步 */
+function mediaUndo() {
+  if (PERSP) exitPersp();
+  const s = MED.hist.pop();
+  if (!s) return toast('没有可撤销的步骤了');
+  mediaRestore(s);
+  mediaDraw();
+}
+
+/** 还原：回到刚打开这张图时的样子 */
+function mediaReset() {
+  if (PERSP) exitPersp();
+  if (!MED.orig) return;
+  MED.hist = [];
+  mediaRestore(MED.orig);
+  MED.crop = null;
+  mediaDraw();
+  toast('已还原到打开时的样子');
+}
+
+function mediaDraw() {
+  const box = MEDIA_EL;
+  if (!box || !MED.img) return;
+  const cv = box.querySelector('#ml-canvas');
+  const img = MED.img;
+  const cw = MED.crop ? MED.crop.w : img.naturalWidth;
+  const ch = MED.crop ? MED.crop.h : img.naturalHeight;
+  const swap = (MED.rot % 180) !== 0;
+  cv.width = swap ? ch : cw;
+  cv.height = swap ? cw : ch;
+  const g = cv.getContext('2d');
+  g.save();
+  g.clearRect(0, 0, cv.width, cv.height);
+  g.translate(cv.width / 2, cv.height / 2);
+  g.rotate(MED.rot * Math.PI / 180);
+  g.scale(MED.fh ? -1 : 1, MED.fv ? -1 : 1);
+  g.drawImage(img, MED.crop ? MED.crop.x : 0, MED.crop ? MED.crop.y : 0, cw, ch,
+              -cw / 2, -ch / 2, cw, ch);
+  g.restore();
+  const meta = box.querySelector('.ml-meta');
+  if (meta) meta.textContent = (MED.foreign ? '（不在本文媒体目录）　' : '') +
+    MED.name + '　·　' + cv.width + '×' + cv.height +
+    '　·　' + (MEDIA.items.length > 1 ? (MEDIA.idx + 1) + ' / ' + MEDIA.items.length : '1 张');
+}
+
+/** 把当前画布上的选区长出来，变成新图（旋转/翻转已经烘焙进去） */
+function mediaApplyCrop(x, y, w, h) {
+  const box = MEDIA_EL;
+  const cv = box.querySelector('#ml-canvas');
+  const fx = cv.width / cv.clientWidth, fy = cv.height / cv.clientHeight;
+  const sx = Math.max(0, Math.round(Math.min(x, x + w) * fx));
+  const sy = Math.max(0, Math.round(Math.min(y, y + h) * fy));
+  const sw = Math.min(cv.width - sx, Math.round(Math.abs(w) * fx));
+  const sh = Math.min(cv.height - sy, Math.round(Math.abs(h) * fy));
+  if (sw < 4 || sh < 4) return;
+  const tmp = document.createElement('canvas');
+  tmp.width = sw; tmp.height = sh;
+  tmp.getContext('2d').drawImage(cv, sx, sy, sw, sh, 0, 0, sw, sh);
+  const url = tmp.toDataURL('image/png');
+  const im = new Image();
+  im.onload = () => {
+    MED.hist.push(mediaSnapshot());
+    MED.img = im; MED.rot = 0; MED.fh = false; MED.fv = false; MED.crop = null;
+    MED.cropMode = false;
+    box.querySelector('.ml-canvas-wrap').classList.remove('cropping');
+    box.querySelector('[data-mact="crop"]').classList.remove('on');
+    box.querySelector('.ml-crop').hidden = true;
+    mediaDraw();
+  };
+  im.src = url;
+}
+
+function mediaStep(dir) {
+  if (MEDIA.items.length < 2 || MEDIA.idx < 0) return;
+  let i = MEDIA.idx + dir;
+  if (i < 0) i = MEDIA.items.length - 1;
+  if (i >= MEDIA.items.length) i = 0;
+  mediaOpenIdx(i);
+}
+
+/* ── 透视矫正 ───────────────────────────────────────────── */
+function drawQuad() {
+  if (!QUAD || !MEDIA_EL) return;
+  const box = MEDIA_EL;
+  const cv = box.querySelector('#ml-canvas');
+  const w = cv.clientWidth, h = cv.clientHeight;
+  box.querySelectorAll('.ml-qh').forEach(el => {
+    const i = +el.dataset.q;
+    if (!QUAD[i]) return;
+    el.style.left = (QUAD[i][0] * w) + 'px';
+    el.style.top = (QUAD[i][1] * h) + 'px';
+  });
+  const poly = QUAD.map(p => (p[0] * 100).toFixed(2) + ',' + (p[1] * 100).toFixed(2)).join(' ');
+  const pg = box.querySelector('.ml-qline polygon');
+  if (pg) pg.setAttribute('points', poly);
+}
+
+/** 点「透视矫正」：先自动认纸面；认不出来再让手动拖四角 */
+let SCAN_ENGINE = null;      // 懒加载：opencv.js + jscanify（只在第一次点「透视矫正」时拉）
+
+/** 加载图像识别引擎（OpenCV.js + jscanify），返回 jscanify 构造函数 */
+function loadScanEngine() {
+  if (SCAN_ENGINE) return SCAN_ENGINE;
+  SCAN_ENGINE = new Promise((resolve, reject) => {
+    const withJscanify = () => {
+      if (window.jscanify) return resolve(window.jscanify);
+      const s = document.createElement('script');
+      s.src = '/vendor/jscanify.js';
+      s.onload = () => resolve(window.jscanify);
+      s.onerror = () => reject(new Error('识别脚本加载失败'));
+      document.head.appendChild(s);
+    };
+    if (window.cv && window.cv.Mat) return withJscanify();
+    const s0 = document.createElement('script');
+    s0.src = '/vendor/opencv.js';
+    s0.onload = () => {
+      const t0 = Date.now();
+      const tick = () => {
+        if (window.cv && window.cv.Mat) return withJscanify();
+        if (Date.now() - t0 > 40000) return reject(new Error('识别引擎初始化超时'));
+        setTimeout(tick, 120);
+      };
+      tick();
+    };
+    s0.onerror = () => reject(new Error('识别引擎加载失败'));
+    document.head.appendChild(s0);
+  });
+  return SCAN_ENGINE;
+}
+
+/** 用 jscanify/OpenCV 找纸面四角（找不到或铺满画面返回 null） */
+async function enginePaperQuad(cvEl) {
+  const JS = await loadScanEngine();
+  const scanner = new JS();
+  let src = null, contour = null;
+  try {
+    src = cv.imread(cvEl);                       // 画布 → cv.Mat
+    contour = scanner.findPaperContour(src);     // 找最大的四边形轮廓
+    if (!contour) return null;
+    const q = scanner.getCornerPoints(contour);
+    if (!q || !q.topLeftCorner) return null;
+    const pts = [q.topLeftCorner, q.topRightCorner, q.bottomRightCorner, q.bottomLeftCorner]
+      .map(p => [p.x, p.y]);
+    const area = Math.abs(polyArea(pts)) / (cvEl.width * cvEl.height);
+    if (!(area > 0.08 && area < 0.985)) return null;   // 太小=噪点，太大=铺满画面
+    return pts;
+  } finally {
+    if (src && !src.isDeleted()) src.delete();
+    if (contour && !contour.isDeleted()) contour.delete();
+  }
+}
+
+async function autoPersp() {
+  if (!MED.img) return;
+  const cv = MEDIA_EL.querySelector('#ml-canvas');
+  const path0 = MED.path, mtime0 = MED.mtime;
+  // ① 先用 OpenCV + jscanify 认纸边：拍纸、拍本子这类最稳
+  try {
+    if (!window.cv) toast('第一次用要加载识别引擎，稍等两三秒…');
+    const pts = await enginePaperQuad(cv);
+    if (pts) {
+      if (MED.path !== path0) return;                 // 等引擎的时候换了图，就别动
+      PERSP_TRIED = false;
+      return applyQuad(pts, mediaSnapshot(), '已识别纸边并拉正，记得点「保存」');
+    }
+  } catch (e) {
+    console.warn('识别引擎不可用：', e);
+  }
+  if (MED.path !== path0) return;
+  // ② 看不到纸边（整页扫描、拍满画面）：按文字行的形状判歪
+  const tq = detectTextQuad(cv);
+  if (tq && (Math.abs(tq.tilt) >= 0.35 || tq.skew >= 0.006)) {
+    PERSP_TRIED = false;
+    const how = Math.abs(tq.tilt) >= 0.35
+      ? '歪了 ' + Math.abs(tq.tilt).toFixed(1) + '°'
+      : '左右差 ' + (tq.skew * 100).toFixed(1) + '%';
+    return applyQuad(tq.quad, mediaSnapshot(), '已按文字行摆正（' + how + '），记得点「保存」');
+  }
+  // ③ 文字行也看不出来：只做整体倾斜摆正
+  const ang = detectSkew(cv);
+  if (Math.abs(ang) >= 0.6) { PERSP_TRIED = false; return applySkew(ang); }
+  if (PERSP_TRIED) {
+    PERSP_TRIED = false;
+    enterPersp();
+    return toast('手动把四个点拖到纸的四个角上，再点一次「透视矫正」应用');
+  }
+  PERSP_TRIED = true;
+  return toast('没看出歪斜，已经够正了；要手动调就再点一次「透视矫正」');
+}
+
+/** 多边形面积（任意点数，符号无关） */
+function polyArea(pts) {
+  let s = 0;
+  for (let i = 0, n = pts.length; i < n; i++) {
+    const a = pts[i], b = pts[(i + 1) % n];
+    s += a[0] * b[1] - b[0] * a[1];
+  }
+  return s / 2;
+}
+
+function shoelace(q) {
+  let s = 0;
+  for (let i = 0; i < 4; i++) {
+    const a = q[i], b = q[(i + 1) % 4];
+    s += a[0] * b[1] - b[0] * a[1];
+  }
+  return s / 2;
+}
+
+function nearBorder(q, w, h) {
+  const m = Math.min(w, h) * 0.02;
+  return q.every(p => p[0] < m || p[0] > w - m || p[1] < m || p[1] > h - m);
+}
+
+/** 最小二乘拟合直线（y = a·x + b），点太少或近乎竖直就返回 null；剔除离群点再来一次 */
+function fitBoundary(pts) {
+  let cur = pts;
+  for (let pass = 0; pass < 3; pass++) {
+    const n = cur.length;
+    if (n < 10) return null;
+    let sx = 0, sy = 0;
+    for (const p of cur) { sx += p[0]; sy += p[1]; }
+    const mx = sx / n, my = sy / n;
+    let sxx = 0, sxy = 0;
+    for (const p of cur) { const dx = p[0] - mx; sxx += dx * dx; sxy += dx * (p[1] - my); }
+    if (sxx < 1e-6) return null;
+    const a = sxy / sxx, b = my - a * mx;
+    let sum = 0;
+    const res = cur.map(p => Math.abs(p[1] - (a * p[0] + b)));
+    for (const r of res) sum += r;
+    const mean = sum / n;
+    const lim = Math.max(3, mean * 2.2);
+    const keep = cur.filter((p, i) => res[i] <= lim);
+    if (keep.length === n || keep.length < 10) return { a: a, b: b };
+    cur = keep;
+  }
+  return null;
+}
+
+/** 两条线求交：y = a1·x + b1 与 x = c2·y + d2 */
+function crossBounds(l1, l2) {
+  const den = 1 - l1.a * l2.c;
+  if (Math.abs(den) < 1e-6) return null;
+  const y = (l1.a * l2.d + l1.b) / den;
+  return [l2.c * y + l2.d, y];
+}
+
+/**
+ * 按「文字的形状」找纸面：先按行投影切出文字行，量出文字块的上下左右四条边界线，
+ * 四条线求交得到四角。字被拍歪、拍斜、近大远小都能看出来，不依赖有没有纸边。
+ */
+function detectTextQuad(cv) {
+  const MAXD = 760;
+  const sc = Math.min(1, MAXD / Math.max(cv.width, cv.height));
+  const w = Math.max(60, Math.round(cv.width * sc));
+  const h = Math.max(60, Math.round(cv.height * sc));
+  const t = document.createElement('canvas');
+  t.width = w; t.height = h;
+  const g = t.getContext('2d');
+  g.drawImage(cv, 0, 0, w, h);
+  const d = g.getImageData(0, 0, w, h).data;
+  const n = w * h;
+  const lum = new Float32Array(n);
+  const hist = new Uint32Array(256);
+  for (let p = 0, i = 0; p < n; p++, i += 4) {
+    const l = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    lum[p] = l; hist[l | 0]++;
+  }
+  // Otsu 阈值：比它暗的算笔画
+  let sum = 0;
+  for (let i = 0; i < 256; i++) sum += i * hist[i];
+  let sumB = 0, wB = 0, best = 0, thr = 128;
+  for (let i = 0; i < 256; i++) {
+    wB += hist[i];
+    if (!wB) continue;
+    const wF = n - wB;
+    if (!wF) break;
+    sumB += i * hist[i];
+    const mB = sumB / wB, mF = (sum - sumB) / wF;
+    const v = wB * wF * (mB - mF) * (mB - mF);
+    if (v > best) { best = v; thr = i; }
+  }
+  const cut = thr - 6;
+  // 行投影，切出文字行
+  const rows = new Float32Array(h);
+  for (let y = 0; y < h; y++) {
+    let c = 0;
+    const o = y * w;
+    for (let x = 0; x < w; x++) if (lum[o + x] < cut) c++;
+    rows[y] = c;
+  }
+  let rowMax = 0;
+  for (let y = 0; y < h; y++) if (rows[y] > rowMax) rowMax = rows[y];
+  if (rowMax < w * 0.04) { return null; }
+  const minCount = Math.max(2, rowMax * 0.12);
+  const bands = [];
+  let st = -1;
+  for (let y = 0; y < h; y++) {
+    const on = rows[y] >= minCount;
+    if (on && st < 0) st = y;
+    if (st >= 0 && (!on || y === h - 1)) {
+      const e = on ? y : y - 1;
+      if (e - st >= 1) bands.push([st, e]);
+      st = -1;
+    }
+  }
+  if (bands.length < 3) { return null; }
+  const top = bands[0][0], bot = bands[bands.length - 1][1];
+  if (bot - top < h * 0.18) { return null; }
+
+  // 每一列在文字块里的最上／最下笔画 → 上下边界
+  const topPts = [], botPts = [];
+  for (let x = 0; x < w; x++) {
+    let y0 = -1, y1 = -1;
+    for (let y = top; y <= bot; y++) {
+      if (lum[y * w + x] < cut) { if (y0 < 0) y0 = y; y1 = y; }
+    }
+    if (y0 >= 0) { topPts.push([x, y0]); botPts.push([x, y1]); }
+  }
+  // 每一行在文字块里的最左／最右笔画 → 左右边界
+  const leftPts = [], rightPts = [];
+  for (let y = top; y <= bot; y++) {
+    let x0 = -1, x1 = -1;
+    for (let x = 0; x < w; x++) {
+      if (lum[y * w + x] < cut) { if (x0 < 0) x0 = x; x1 = x; }
+    }
+    if (x0 >= 0) { leftPts.push([y, x0]); rightPts.push([y, x1]); }
+  }
+  const lt = fitBoundary(topPts), lb = fitBoundary(botPts);
+  const ll = fitBoundary(leftPts), lr = fitBoundary(rightPts);
+  if (!lt || !lb || !ll || !lr) { return null; }
+  // 明显不合理（字行倾斜过 30°、边界近乎平行）就别信
+  if (Math.abs(lt.a) > 0.6 || Math.abs(lb.a) > 0.6) { return null; }
+  if (Math.abs(ll.a) > 0.6 || Math.abs(lr.a) > 0.6) { return null; }
+  // 拟合是在「行做 x」的坐标系里，换回 x = c·y + d
+  const L1 = { a: lt.a, b: lt.b };                    // 上边：y = a x + b
+  const L2 = { a: lb.a, b: lb.b };                    // 下边
+  const LL = { c: ll.a, d: ll.b };                    // 左边：x = c y + d
+  const LR = { c: lr.a, d: lr.b };                    // 右边
+  const tl = crossBounds(L1, LL), tr = crossBounds(L1, LR);
+  const br = crossBounds(L2, LR), bl = crossBounds(L2, LL);
+  if (!tl || !tr || !br || !bl) { return null; }
+  const quad = [tl, tr, br, bl];
+  // 有效面积、边长检查
+  const area = Math.abs(polyArea(quad)) / (w * h);
+  if (area < 0.15) { return null; }
+  const side = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]);
+  const bw = Math.max(side(tl, tr), side(bl, br));
+  const bh = Math.max(side(tl, bl), side(tr, br));
+  if (bw < w * 0.3 || bh < h * 0.15) { return null; }
+
+  // 往外放一点余量，别把纸面留白切光
+  const cx = (tl[0] + tr[0] + br[0] + bl[0]) / 4;
+  const cy = (tl[1] + tr[1] + br[1] + bl[1]) / 4;
+  const pad = 1.035;
+  const grown = quad.map(p => {
+    const x = cx + (p[0] - cx) * pad, y = cy + (p[1] - cy) * pad;
+    return [Math.min(w - 0.5, Math.max(0, x)) / sc, Math.min(h - 0.5, Math.max(0, y)) / sc];
+  });
+
+  // 量一下「歪了多少」：上边斜率、左右高度差
+  const tilt = Math.atan2(tr[1] - tl[1], tr[0] - tl[0]) * 180 / Math.PI;
+  const hL = side(tl, bl), hR = side(tr, br);
+  const skew = Math.abs(hL - hR) / Math.max(hL, hR, 1);
+  return { quad: grown, tilt: tilt, skew: skew };
+}
+
+/** 自动识别：缩图 → 亮度 Otsu → 最大亮块 → 轮廓凸包 → 最大面积四边形 */
+function detectPageQuad(cv) {
+  const MAXD = 520;
+  const sc = Math.min(1, MAXD / Math.max(cv.width, cv.height));
+  const w = Math.max(16, Math.round(cv.width * sc)), h = Math.max(16, Math.round(cv.height * sc));
+  const t = document.createElement('canvas');
+  t.width = w; t.height = h;
+  const g = t.getContext('2d');
+  try { g.drawImage(cv, 0, 0, w, h); } catch (e) { return null; }
+  let data;
+  try { data = g.getImageData(0, 0, w, h).data; } catch (e) { return null; }
+
+  const n = w * h;
+  const lum = new Uint8Array(n);
+  const hist = new Uint32Array(256);
+  for (let p = 0, i = 0; p < n; p++, i += 4) {
+    const l = (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) | 0;
+    lum[p] = l; hist[l]++;
+  }
+  // Otsu 阈值
+  let sum = 0;
+  for (let i = 0; i < 256; i++) sum += i * hist[i];
+  let sumB = 0, wB = 0, best = -1, thr = 128;
+  for (let i = 0; i < 256; i++) {
+    wB += hist[i];
+    if (!wB) continue;
+    const wF = n - wB;
+    if (!wF) break;
+    sumB += i * hist[i];
+    const mB = sumB / wB, mF = (sum - sumB) / wF;
+    const between = wB * wF * (mB - mF) * (mB - mF);
+    if (between > best) { best = between; thr = i; }
+  }
+
+  let flat = false;
+  for (const bright of [true, false]) {
+    const mask = new Uint8Array(n);
+    for (let p = 0; p < n; p++) mask[p] = (bright ? lum[p] > thr : lum[p] <= thr) ? 1 : 0;
+    const res = quadFromMask(mask, w, h);
+    if (!res) continue;
+    if (res.coverage > 0.965) { flat = true; continue; }
+    const quad = res.quad;
+    const s2 = Math.abs(shoelace(quad)) / (w * h);
+    if (s2 > 0.14 && s2 < 0.965) return quad.map(p => [p[0] / sc, p[1] / sc]);
+  }
+  // 纸面铺满整张图：没有可见纸边，谈不上校正
+  return flat ? 'flat' : null;
+}
+
+/** 最大连通域 → 轮廓点 → 凸包 → 最大面积四边形（像素坐标） */
+function quadFromMask(mask, w, h) {
+  const n = w * h;
+  const seen = new Uint8Array(n);
+  let bestPix = null, bestCount = 0;
+  const stack = new Int32Array(n);
+  for (let start = 0; start < n; start++) {
+    if (!mask[start] || seen[start]) continue;
+    let sp = 0, count = 0;
+    stack[sp++] = start;
+    seen[start] = 1;
+    const idx = [];
+    while (sp > 0) {
+      const p = stack[--sp];
+      const x = p % w, y = (p / w) | 0;
+      count++;
+      idx.push(p);
+      if (x > 0) { const q = p - 1; if (mask[q] && !seen[q]) { seen[q] = 1; stack[sp++] = q; } }
+      if (x < w - 1) { const q = p + 1; if (mask[q] && !seen[q]) { seen[q] = 1; stack[sp++] = q; } }
+      if (y > 0) { const q = p - w; if (mask[q] && !seen[q]) { seen[q] = 1; stack[sp++] = q; } }
+      if (y < h - 1) { const q = p + w; if (mask[q] && !seen[q]) { seen[q] = 1; stack[sp++] = q; } }
+    }
+    if (count > bestCount) { bestCount = count; bestPix = idx; }
+  }
+  if (!bestPix || bestCount < n * 0.1) return null;
+
+  // 只取轮廓（上下左右有邻居在域外的像素），并控一下点数
+  const step = Math.max(1, Math.ceil(bestPix.length / 60000));
+  const edge = [];
+  for (let i = 0; i < bestPix.length; i += step) {
+    const p = bestPix[i], x = p % w, y = (p / w) | 0;
+    if (x === 0 || y === 0 || x === w - 1 || y === h - 1 ||
+        !mask[p - 1] || !mask[p + 1] || !mask[p - w] || !mask[p + w]) {
+      edge.push([x, y]);
+    }
+  }
+  if (edge.length < 12) return null;
+  const hull = convexHull(edge);
+  if (hull.length < 4) return null;
+  let quad = maxAreaQuad(hull);
+  if (!quad) return null;
+  quad = refineQuad(hull, quad, Math.hypot(w, h));
+  // 每条边别太短，否则说明只是画面里的一个小亮斑
+  const diag = Math.hypot(w, h);
+  for (let i = 0; i < 4; i++) {
+    const a = quad[i], b = quad[(i + 1) % 4];
+    if (Math.hypot(a[0] - b[0], a[1] - b[1]) < diag * 0.2) return null;
+  }
+  const hullArea = Math.abs(polyArea(hull)) / n;   // 纸面占画面的比例（按轮廓面积算，不受笔迹影响）
+  return { quad: orderQuad(quad), coverage: hullArea };
+}
+
+/** Andrew monotone chain 凸包 */
+function convexHull(pts) {
+  const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower = [];
+  for (const q of p) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], q) <= 0) lower.pop();
+    lower.push(q);
+  }
+  const upper = [];
+  for (let i = p.length - 1; i >= 0; i--) {
+    const q = p[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], q) <= 0) upper.pop();
+    upper.push(q);
+  }
+  lower.pop(); upper.pop();
+  return lower.concat(upper);
+}
+
+/** 凸包上找面积最大的四点（对角线枚举，O(n³)，n 已限在几百） */
+function maxAreaQuad(hull) {
+  const n = hull.length;
+  const tri = (a, b, c) => Math.abs((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])) / 2;
+  let bestA = 0, best = null;
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      let bk = -1, ba = 0;
+      for (let k = i + 1; k < j; k++) { const a = tri(hull[i], hull[j], hull[k]); if (a > ba) { ba = a; bk = k; } }
+      let bl = -1, bb = 0;
+      for (let l = (j + 1) % n; l !== i; l = (l + 1) % n) {
+        const a = tri(hull[i], hull[j], hull[l]);
+        if (a > bb) { bb = a; bl = l; }
+      }
+      const area = ba + bb;
+      if (bk >= 0 && bl >= 0 && area > bestA) { bestA = area; best = [hull[i], hull[bk], hull[j], hull[bl]]; }
+    }
+  }
+  return best;
+}
+
+/** 角点精修：把四条边附近的凸包点各拟合一条直线，相邻直线求交 */
+function refineQuad(hull, quad, diag) {
+  const q = orderQuad(quad).slice();
+  const tol = diag * 0.045;
+  const lines = [];
+  for (let i = 0; i < 4; i++) {
+    const a = q[i], b = q[(i + 1) % 4];
+    const vx = b[0] - a[0], vy = b[1] - a[1];
+    const len2 = vx * vx + vy * vy;
+    if (len2 < 1) return q;
+    const near = [];
+    for (const p of hull) {
+      const t = ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / len2;
+      if (t < 0.08 || t > 0.92) continue;
+      const dx = p[0] - (a[0] + t * vx), dy = p[1] - (a[1] + t * vy);
+      if (dx * dx + dy * dy <= tol * tol) near.push(p);
+    }
+    if (near.length < 8) return q;                  // 点太少就不精修
+    lines.push(fitLine(near));
+  }
+  const out = [];
+  for (let i = 0; i < 4; i++) {
+    const p = lineCross(lines[(i + 3) % 4], lines[i]);
+    if (!p) return q;
+    out.push(p);
+  }
+  const ref = orderQuad(out);
+  const a1 = Math.abs(shoelace(q)), a2 = Math.abs(shoelace(ref));
+  if (a2 < a1 * 0.85 || a2 > a1 * 1.15) return q;   // 精修跑偏了就放弃
+  return ref;
+}
+
+/** 最小二乘直线：返回 {px,py,dx,dy} 过点+方向 */
+function fitLine(pts) {
+  let mx = 0, my = 0;
+  for (const p of pts) { mx += p[0]; my += p[1]; }
+  mx /= pts.length; my /= pts.length;
+  let sxx = 0, syy = 0, sxy = 0;
+  for (const p of pts) {
+    const dx = p[0] - mx, dy = p[1] - my;
+    sxx += dx * dx; syy += dy * dy; sxy += dx * dy;
+  }
+  const th = 0.5 * Math.atan2(2 * sxy, sxx - syy);   // 主轴方向
+  return { px: mx, py: my, dx: Math.cos(th), dy: Math.sin(th) };
+}
+
+/** 两条直线求交 */
+function lineCross(l1, l2) {
+  const den = l1.dx * l2.dy - l1.dy * l2.dx;
+  if (Math.abs(den) < 1e-9) return null;
+  const t = ((l2.px - l1.px) * l2.dy - (l2.py - l1.py) * l2.dx) / den;
+  return [l1.px + t * l1.dx, l1.py + t * l1.dy];
+}
+
+/** 排成 TL → TR → BR → BL 的顺序（顺时针，屏幕坐标 y 向下） */
+function orderQuad(pts) {
+  const cx = pts.reduce((a, p) => a + p[0], 0) / pts.length;
+  const cy = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+  const arr = pts.slice().sort((a, b) => Math.atan2(a[1] - cy, a[0] - cx) - Math.atan2(b[1] - cy, b[0] - cx));
+  let s = 0;
+  for (let i = 1; i < arr.length; i++) if (arr[i][0] + arr[i][1] < arr[s][0] + arr[s][1]) s = i;
+  return arr.slice(s).concat(arr.slice(0, s));
+}
+
+/** 找文字行的倾斜角（度）：行投影最锐时的剪切角 */
+function detectSkew(cv) {
+  const MAXD = 560;
+  const sc = Math.min(1, MAXD / Math.max(cv.width, cv.height));
+  const w = Math.max(32, Math.round(cv.width * sc)), h = Math.max(32, Math.round(cv.height * sc));
+  const t = document.createElement('canvas'); t.width = w; t.height = h;
+  const g = t.getContext('2d');
+  try { g.drawImage(cv, 0, 0, w, h); } catch (e) { return 0; }
+  let data;
+  try { data = g.getImageData(0, 0, w, h).data; } catch (e) { return 0; }
+  const n = w * h, lum = new Uint8Array(n), hist = new Uint32Array(256);
+  for (let p = 0, i = 0; p < n; p++, i += 4) {
+    const l = (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) | 0;
+    lum[p] = l; hist[l]++;
+  }
+  let sum = 0;
+  for (let i = 0; i < 256; i++) sum += i * hist[i];
+  let sumB = 0, wB = 0, best = -1, thr = 128;
+  for (let i = 0; i < 256; i++) {
+    wB += hist[i]; if (!wB) continue;
+    const wF = n - wB; if (!wF) break;
+    sumB += i * hist[i];
+    const mB = sumB / wB, mF = (sum - sumB) / wF;
+    const b = wB * wF * (mB - mF) * (mB - mF);
+    if (b > best) { best = b; thr = i; }
+  }
+  const dark = new Uint8Array(n);
+  let cnt = 0;
+  for (let p = 0; p < n; p++) if (lum[p] <= thr) { dark[p] = 1; cnt++; }
+  if (cnt < n * 0.002 || cnt > n * 0.6) return 0;      // 几乎没有笔画，谈不上倾斜
+
+  const span = Math.ceil(w * 0.15) + 2;
+  const score = (deg) => {
+    const k = Math.tan(deg * Math.PI / 180);
+    const prof = new Float32Array(h + span * 2);
+    for (let y = 0; y < h; y++) {
+      const row = y * w;
+      for (let x = 0; x < w; x++) {
+        if (!dark[row + x]) continue;
+        const yy = Math.round(y - k * (x - w / 2)) + span;
+        if (yy >= 0 && yy < prof.length) prof[yy]++;
+      }
+    }
+    let acc = 0;
+    for (let i = 0; i < prof.length; i++) acc += prof[i] * prof[i];
+    return acc;
+  };
+  const base = score(0);
+  let bestDeg = 0, bestScore = base;
+  for (let deg = -8; deg <= 8.001; deg += 0.5) {
+    if (Math.abs(deg) < 0.01) continue;
+    const sc2 = score(deg);
+    if (sc2 > bestScore) { bestScore = sc2; bestDeg = deg; }
+  }
+  if (bestScore < base * 1.015) return 0;               // 提升不明显就算没倾斜
+  return bestDeg;
+}
+
+/** 按角度把整张图转正，再裁掉四角透明 */
+function applySkew(deg) {
+  const cv = MEDIA_EL.querySelector('#ml-canvas');
+  const w = cv.width, h = cv.height;
+  const a = -deg * Math.PI / 180;                       // 画布 rotate 正方向是顺时针
+  const co = Math.abs(Math.cos(a)), si = Math.abs(Math.sin(a));
+  const W = Math.round(w * co + h * si), H = Math.round(w * si + h * co);
+  const out = document.createElement('canvas');
+  out.width = W; out.height = H;
+  const g = out.getContext('2d');
+  g.translate(W / 2, H / 2);
+  g.rotate(a);
+  g.drawImage(cv, -w / 2, -h / 2);
+  const box = alphaBBox(out);
+  if (!box) return toast('摆正没成功，换张图试试');
+  const fin = document.createElement('canvas');
+  fin.width = box.w; fin.height = box.h;
+  fin.getContext('2d').drawImage(out, box.x, box.y, box.w, box.h, 0, 0, box.w, box.h);
+  const url = fin.toDataURL('image/png');
+  const prev = mediaSnapshot();
+  const im = new Image();
+  im.onload = () => {
+    MED.hist.push(prev);
+    MED.img = im; MED.rot = 0; MED.fh = false; MED.fv = false;
+    mediaDraw();
+    toast('已摆正 ' + Math.abs(deg).toFixed(1) + '°，记得点「保存」');
+  };
+  im.src = url;
+}
+
+/** 非透明像素的外接框 */
+function alphaBBox(cv) {
+  const w = cv.width, h = cv.height;
+  const d = cv.getContext('2d').getImageData(0, 0, w, h).data;
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (d[(y * w + x) * 4 + 3] < 8) continue;
+      if (x < x0) x0 = x; if (x > x1) x1 = x;
+      if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+  }
+  if (x1 < 0) return null;
+  return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+}
+
+/** 进手动透视：先把旋转/翻转烘焙成像素，再让四个角对着像素拖 */
+function enterPersp() {
+  const box = MEDIA_EL;
+  const cv = box.querySelector('#ml-canvas');
+  const tmp = document.createElement('canvas');
+  tmp.width = cv.width; tmp.height = cv.height;
+  tmp.getContext('2d').drawImage(cv, 0, 0);
+  const url = tmp.toDataURL('image/png');
+  const prev = mediaSnapshot();
+  const im = new Image();
+  im.onload = () => {
+    PERSP = { prev: prev };
+    MED.img = im; MED.rot = 0; MED.fh = false; MED.fv = false;
+    QUAD = [[0.02, 0.02], [0.98, 0.02], [0.98, 0.98], [0.02, 0.98]];
+    mediaDraw();
+    box.querySelector('.ml-quad').hidden = false;
+    box.querySelector('[data-mact="persp"]').classList.add('on');
+    drawQuad();
+    toast('把四个圆点拖到纸的四个角上，再点一次「透视矫正」应用');
+  };
+  im.src = url;
+}
+
+function exitPersp() {
+  const box = MEDIA_EL;
+  if (!box) return;
+  if (PERSP) { mediaRestore(PERSP.prev); }
+  PERSP = null; QUAD = null;
+  box.querySelector('.ml-quad').hidden = true;
+  box.querySelector('[data-mact="persp"]').classList.remove('on');
+  mediaDraw();
+}
+
+/** 8 元一次方程组：解出「输出矩形 → 源四边形」的单应矩阵 */
+function homography(dst, src) {
+  const A = [], b = [];
+  for (let i = 0; i < 4; i++) {
+    const x = dst[i][0], y = dst[i][1], u = src[i][0], v = src[i][1];
+    A.push([x, y, 1, 0, 0, 0, -x * u, -y * u]); b.push(u);
+    A.push([0, 0, 0, x, y, 1, -x * v, -y * v]); b.push(v);
+  }
+  const n = 8;
+  for (let c = 0; c < n; c++) {
+    let p = c;
+    for (let r = c + 1; r < n; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r;
+    const t = A[c]; A[c] = A[p]; A[p] = t;
+    const tb = b[c]; b[c] = b[p]; b[p] = tb;
+    const piv = A[c][c] || 1e-12;
+    for (let r = 0; r < n; r++) {
+      if (r === c) continue;
+      const f = A[r][c] / piv;
+      if (!f) continue;
+      for (let k = c; k < n; k++) A[r][k] -= f * A[c][k];
+      b[r] -= f * b[c];
+    }
+  }
+  return b.map((v, i) => v / (A[i][i] || 1e-12));
+}
+
+/** 把 srcCanvas 里由 quad 圈出的四边形，重采样成 W×H 的矩形 */
+function warpToRect(srcCanvas, quad, W, H) {
+  const sw = srcCanvas.width, sh = srcCanvas.height;
+  const sd = srcCanvas.getContext('2d').getImageData(0, 0, sw, sh).data;
+  const h = homography([[0, 0], [W, 0], [W, H], [0, H]], quad);
+  const out = document.createElement('canvas');
+  out.width = W; out.height = H;
+  const octx = out.getContext('2d');
+  const img = octx.createImageData(W, H);
+  const od = img.data;
+  let o = 0;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const den = h[6] * x + h[7] * y + 1;
+      const d2 = Math.abs(den) < 1e-9 ? 1e-9 : den;
+      const u = (h[0] * x + h[1] * y + h[2]) / d2;
+      const v = (h[3] * x + h[4] * y + h[5]) / d2;
+      let r = 0, g = 0, b = 0, a = 0;
+      if (u >= 0 && v >= 0 && u <= sw - 1 && v <= sh - 1) {
+        const x0 = u | 0, y0 = v | 0;
+        const x1 = Math.min(x0 + 1, sw - 1), y1 = Math.min(y0 + 1, sh - 1);
+        const fx = u - x0, fy = v - y0;
+        const i00 = (y0 * sw + x0) * 4, i10 = (y0 * sw + x1) * 4;
+        const i01 = (y1 * sw + x0) * 4, i11 = (y1 * sw + x1) * 4;
+        const w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy);
+        const w01 = (1 - fx) * fy, w11 = fx * fy;
+        r = sd[i00] * w00 + sd[i10] * w10 + sd[i01] * w01 + sd[i11] * w11;
+        g = sd[i00 + 1] * w00 + sd[i10 + 1] * w10 + sd[i01 + 1] * w01 + sd[i11 + 1] * w11;
+        b = sd[i00 + 2] * w00 + sd[i10 + 2] * w10 + sd[i01 + 2] * w01 + sd[i11 + 2] * w11;
+        a = sd[i00 + 3] * w00 + sd[i10 + 3] * w10 + sd[i01 + 3] * w01 + sd[i11 + 3] * w11;
+      }
+      od[o] = r; od[o + 1] = g; od[o + 2] = b; od[o + 3] = a;
+      o += 4;
+    }
+  }
+  octx.putImageData(img, 0, 0);
+  return out;
+}
+
+/** 用给的四角做矫正（自动、手动共用） */
+function applyQuad(q, prev, msg) {
+  const cv = MEDIA_EL.querySelector('#ml-canvas');
+  const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  const wTop = dist(q[0], q[1]), wBot = dist(q[3], q[2]);
+  const hLeft = dist(q[0], q[3]), hRight = dist(q[1], q[2]);
+  let W = Math.round(Math.max(wTop, wBot)), H = Math.round(Math.max(hLeft, hRight));
+  const MAXD = 2600;
+  const k = Math.min(1, MAXD / Math.max(W, H, 1));
+  W = Math.max(8, Math.round(W * k)); H = Math.max(8, Math.round(H * k));
+  toast('正在矫正…');
+  setTimeout(() => {
+    let url;
+    try { url = warpToRect(cv, q, W, H).toDataURL('image/png'); }
+    catch (e) { return toast('矫正失败：' + e.message); }
+    const im = new Image();
+    im.onload = () => {
+      if (prev) MED.hist.push(prev);
+      MED.img = im; MED.rot = 0; MED.fh = false; MED.fv = false;
+      if (PERSP) { PERSP = null; QUAD = null; }
+      MEDIA_EL.querySelector('.ml-quad').hidden = true;
+      MEDIA_EL.querySelector('[data-mact="persp"]').classList.remove('on');
+      mediaDraw();
+      toast(msg || '已矫正成正视，记得点「保存」');
+    };
+    im.src = url;
+  }, 30);
+}
+
+function applyPersp() {
+  if (!QUAD) return;
+  const cv = MEDIA_EL.querySelector('#ml-canvas');
+  const q = QUAD.map(p => [p[0] * cv.width, p[1] * cv.height]);
+  const prev = PERSP ? PERSP.prev : null;
+  applyQuad(q, prev);
+}
+
+async function mediaSave() {
+  const box = MEDIA_EL;
+  if (!box || !MED.img) return;
+  const ext = (MED.name.split('.').pop() || 'png').toLowerCase();
+  if (ext === 'gif' || ext === 'svg') return toast('GIF / SVG 不能这样保存，换张图试试');
+  const cv = box.querySelector('#ml-canvas');
+  const type = (ext === 'jpg' || ext === 'jpeg') ? 'image/jpeg'
+             : ext === 'webp' ? 'image/webp' : 'image/png';
+  let data;
+  try { data = cv.toDataURL(type, 0.94); }
+  catch (e) { return toast('导出图片失败：' + e.message); }
+  try {
+    const r = await post('/api/media/save', { path: MED.path, data: data });
+    MED.mtime = r.mtime;
+    const it = MEDIA.items.find(x => x.path === MED.path);
+    if (it) { it.mtime = r.mtime; it.size = r.size; }
+    IMG_VER.set(r.path, r.mtime);
+    bustPreviewImage(r.path, r.mtime);
+    if (el.preview && S.current) {                   // 重渲染一次，正文里的同一张图立刻换新
+      const sc = el.preview.scrollTop;
+      render();
+      el.preview.scrollTop = sc;
+    }
+    const th = box.querySelectorAll('.ml-thumb')[MEDIA.idx];
+    if (th) { const im = th.querySelector('img'); if (im && it) im.src = it.url + '&v=' + r.mtime; }
+    if (MEDIA.from === 'preview') { closeMedia(); toast('已保存，回到正文'); return; }
+    // 媒体库里存完回到「看大图」，原始基准也换成新图
+    await openEditDone(r.mtime);
+    toast('已保存（' + MED.name + '）');
+  } catch (e) { toast('保存失败：' + (e.message || '未知错误')); }
+}
+
+async function openEditDone(mtime) {
+  let rec = MEDIA.items.find(x => x.path === MED.path) ||
+              { path: MED.path, name: MED.name, mtime: mtime, url: '/api/raw?path=' + encodeURIComponent(MED.path) };
+  rec = Object.assign({}, rec, { mtime: mtime });
+  await mediaOpenFile(rec, !!MED.foreign, 'view');
+}
+
+/** 保存后让预览里的同一张图立刻换新（URL 上带 v= 破缓存） */
+function bustPreviewImage(rel, mtime) {
+  if (!el.preview) return;
+  $$('#preview img').forEach(im => {
+    const src = im.getAttribute('src') || '';
+    if (imgPathFromSrc(src) !== rel) return;
+    im.setAttribute('src', src.split('&v=')[0] + '&v=' + mtime);
+  });
+}
+
 
 /* ══ 动作 ═══════════════════════════════════════════════ */
 /** 图片灯箱：点预览里的图放大看，← → 翻页，Esc/点背景关闭 */
@@ -2385,15 +3715,23 @@ async function doExportZip(dir, isAll) {
       if (!data) continue;
       addEntry(p.slice(dir.length).replace(/^\//, ''), data);
       // 正文里引用的插图一并打包，否则解压出来全是断链
-      for (const m of new TextDecoder().decode(data).matchAll(/\]\(\/assets\/([^)\s]+)\)/g)) {
-        let n = m[1];
-        try { n = decodeURIComponent(n); } catch (e) {}
-        if (n) assets.add(n);
+      // 支持两种写法：老的 /assets/xx.png（全库目录）和新的 <笔记名>.assets/xx.png（本文目录）
+      for (const m of new TextDecoder().decode(data).matchAll(/\]\(([^)\s]+\.(?:png|jpe?g|gif|webp|bmp|svg|avif))\)/gi)) {
+        let ref = m[1];
+        try { ref = decodeURIComponent(ref); } catch (e2) {}
+        if (/^(https?:|data:)/i.test(ref)) continue;
+        let rel;
+        if (ref.startsWith('/assets/')) rel = 'assets/' + ref.slice(8);
+        else if (ref.startsWith('/')) rel = ref.slice(1);
+        else rel = (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) + '/' : '') + ref.replace(/^\.\//, '');
+        if (rel) assets.add(rel);
       }
     }
     for (const n of assets) {
-      const data = await getRaw('assets/' + n);
-      if (data) addEntry('assets/' + n, data);
+      const data = await getRaw(n);
+      // 打包时保持相对位置：md 在 <dir>/ 下，图在 <dir>/<笔记名>.assets/ 下
+      const pre = dir ? dir.replace(/^\/+|\/+$/g, '') + '/' : '';
+      if (data) addEntry(pre && n.startsWith(pre) ? n.slice(pre.length) : n, data);
     }
     const cdStart = offset;
     const cdParts = [];
@@ -2545,10 +3883,14 @@ async function boot(justLoggedIn) {
     // 用户信息渲染属于「锦上添花」：任何一个节点缺失都不该让整个 boot 崩掉
     try {
       if (el.uname) el.uname.textContent = me.user;
-      el.avatar.textContent = me.user.trim().charAt(0).toUpperCase() || '素';
+      // 有头像图就别用 textContent 把 <img> 冲掉（上一版就是这么把头像冲没的）
+      if (el.avatar && !el.avatar.querySelector('img')) {
+        el.avatar.textContent = me.user.trim().charAt(0).toUpperCase() || '素';
+      }
       el.menuHead.textContent = me.user;                 // 用户名就是显示名
       if (el.btnUser) el.btnUser.title = '账号 · ' + me.user;
       localStorage.setItem('sj-user', me.user);
+      refreshAvatar();                                   // 登录后才拿得到头像图
     } catch (e) { console.error('用户信息渲染失败（不影响使用）', e); }
   }
   // 站名/标签标题等与服务器对齐：服务器有值以服务器为准，服务器空则把本机设置推上去

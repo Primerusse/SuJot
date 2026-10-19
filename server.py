@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-速笺 / Sujian —— 极简本地笔记服务（纯标准库）
+速笺 / SuJot —— 极简本地笔记服务（纯标准库）
 
 设计原则
   · 一条进程、一个数据目录、零依赖（不用数据库、不用 Node）
@@ -31,7 +31,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 # 项目级参数集中放 _config.json（就在本文件旁边，随仓库分发）。
 # 优先级：环境变量 > _config.json > 代码里的默认值。
 # 这个文件可以整个删掉，删了就全走默认值；它不是运行数据，改它不碰你的笔记。
-CONFIGFILE = os.environ.get("SUJIAN_CONFIG") or os.path.join(
+CONFIGFILE = os.environ.get("SUJOT_CONFIG") or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "_config.json")
 
 
@@ -102,26 +102,26 @@ def _env_cfg(envname, key, default=None):
 def _pick_base():
     """数据目录（笔记、历史、回收站、账号都在这里）。
 
-    优先环境变量 SUJIAN_BASE，其次 _config.json 的 data_dir；都没设时：
-    服务器上按约定用 /srv/sujian，本地（Windows / macOS / 非 root）退回
+    优先环境变量 SUJOT_BASE，其次 _config.json 的 data_dir；都没设时：
+    服务器上按约定用 /srv/sujot，本地（Windows / macOS / 非 root）退回
     server.py 旁边的 data/ —— 这样克隆下来直接 `python server.py` 就能跑，
     不必先配环境变量。
     """
-    env = _env_cfg("SUJIAN_BASE", "data_dir")
+    env = _env_cfg("SUJOT_BASE", "data_dir")
     if env:
         return env
     if os.name != "nt" and os.path.isdir("/srv") and os.access("/srv", os.W_OK):
-        return "/srv/sujian"
+        return "/srv/sujot"
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
 
 BASE = _pick_base()
 NOTES = os.path.join(BASE, "notes")
-# 前端静态文件：优先 SUJIAN_STATIC / _config.json 的 static_dir，其次数据目录下的 static/，
+# 前端静态文件：优先 SUJOT_STATIC / _config.json 的 static_dir，其次数据目录下的 static/，
 # 最后退回 server.py 同级的 static/ —— 这样「克隆下来直接 python3 server.py」也能跑，
-# 不必先把静态目录拷进 SUJIAN_BASE（README 的快速开始就是按这个来的）。
+# 不必先把静态目录拷进 SUJOT_BASE（README 的快速开始就是按这个来的）。
 def _pick_static():
-    env = _env_cfg("SUJIAN_STATIC", "static_dir")
+    env = _env_cfg("SUJOT_STATIC", "static_dir")
     if env:
         return env
     near_base = os.path.join(BASE, "static")
@@ -138,16 +138,16 @@ HISTORY = os.path.join(BASE, ".history")
 TRASH = os.path.join(BASE, ".trash")
 USERSFILE = os.path.join(BASE, "users.json")
 SITEFILE = os.path.join(BASE, "site.json")
-PASSFILE = _env_cfg("SUJIAN_PASSFILE", "pass_file") or "/etc/sujian/pass"
+PASSFILE = _env_cfg("SUJOT_PASSFILE", "pass_file") or "/etc/sujot/pass"
 SECRETFILE = os.path.join(BASE, ".secret")
-SEEDDIR = _env_cfg("SUJIAN_SEED", "seed_dir") or os.path.join(
+SEEDDIR = _env_cfg("SUJOT_SEED", "seed_dir") or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "assets")
-HOST = str(_env_cfg("SUJIAN_HOST", "host", "127.0.0.1"))
-PORT = int(_env_cfg("SUJIAN_PORT", "port", 8013))
-COOKIE = str(_cfg("cookie_name", "sujian"))
-SESSION_DAYS = int(_env_cfg("SUJIAN_SESSION_DAYS", "session_days", 30))
-MAX_BODY = int(float(_env_cfg("SUJIAN_MAX_BODY_MB", "max_body_mb", 8)) * 1024 * 1024)
-KEEP_HISTORY = int(_env_cfg("SUJIAN_KEEP_HISTORY", "keep_history", 30))
+HOST = str(_env_cfg("SUJOT_HOST", "host", "127.0.0.1"))
+PORT = int(_env_cfg("SUJOT_PORT", "port", 8013))
+COOKIE = str(_cfg("cookie_name", "sujot"))
+SESSION_DAYS = int(_env_cfg("SUJOT_SESSION_DAYS", "session_days", 30))
+MAX_BODY = int(float(_env_cfg("SUJOT_MAX_BODY_MB", "max_body_mb", 8)) * 1024 * 1024)
+KEEP_HISTORY = int(_env_cfg("SUJOT_KEEP_HISTORY", "keep_history", 30))
 GZIP_MIN = int(_cfg("gzip_min_bytes", 1024))            # 超过这个字节数的文本类才 gzip
 CACHE_DAYS = int(_cfg("cache_days", 365))               # 带 ?v= 的静态件缓存天数
 OPEN_BROWSER = bool(_cfg("open_browser", True))         # 本机启动时顺手开浏览器
@@ -176,6 +176,21 @@ def _read_version():
 
 APP_VERSION = _read_version()
 
+
+def _static_stamp():
+    """前端资源的缓存号：版本号 + 静态文件 mtime。
+
+    版本号不常动时，只改 app.js 也必须让浏览器重新取，否则 ?v= 不变就会吃老缓存。"""
+    try:
+        newest = max(os.path.getmtime(os.path.join(STATIC, f))
+                     for f in ("app.js", "app.css") if os.path.exists(os.path.join(STATIC, f)))
+    except Exception:
+        newest = time.time()
+    return "%s-%s" % (APP_VERSION, time.strftime("%Y%m%d%H%M", time.localtime(newest)))
+
+
+STATIC_VER = _static_stamp()
+
 for d in (NOTES, HISTORY, TRASH):
     os.makedirs(d, exist_ok=True)
 
@@ -199,7 +214,7 @@ def _secret():
 
 
 SECRET = _secret()
-LEGACY_PASSWORD = os.environ.get("SUJIAN_PASSWORD") or _read(PASSFILE)
+LEGACY_PASSWORD = os.environ.get("SUJOT_PASSWORD") or _read(PASSFILE)
 
 
 # ── 账号 ────────────────────────────────────────────────────────────────
@@ -308,7 +323,7 @@ def bootstrap_users():
 
     默认 admin / admin，并打上 must_change：登录后必须先把昵称和密码改掉，
     之后才算真正可用（写入接口在此之前一律 403）。
-    老部署如果还留着明文口令文件（/etc/sujian/pass 或 SUJIAN_PASSWORD），
+    老部署如果还留着明文口令文件（/etc/sujot/pass 或 SUJOT_PASSWORD），
     就沿用它当密码、且不强制改——这样升级不会把人锁在门外。
     明文口令文件只是兼容，不是必需品；新部署不必创建它。
     """
@@ -406,6 +421,22 @@ def rel_of(path):
     return os.path.relpath(path, NOTES).replace(os.sep, "/")
 
 
+# 每篇笔记自己的媒体目录：与笔记同层，名字＝笔记名 + ".assets"
+IMG_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".avif")
+
+
+def assets_dir_rel(doc_rel):
+    """笔记的相对路径 → 它的媒体目录相对路径（不保证存在）"""
+    doc_rel = (doc_rel or "").strip("/")
+    d = os.path.dirname(doc_rel)
+    stem = os.path.splitext(os.path.basename(doc_rel))[0] or "assets"
+    return (d + "/" if d else "") + stem + ".assets"
+
+
+def is_assets_dir(name):
+    return name.endswith(".assets")
+
+
 ORDERFILE = os.path.join(BASE, "order.json")
 
 
@@ -454,7 +485,7 @@ def build_tree(root=NOTES, order=None):
         return entries
     dirs, files = [], []
     for n in names:
-        if n.startswith(".") or n in SKIP_DIRS or n in SKIP_FILES:
+        if n.startswith(".") or n in SKIP_DIRS or n in SKIP_FILES or is_assets_dir(n):
             continue
         full = os.path.join(root, n)
         if os.path.isdir(full):
@@ -604,7 +635,7 @@ def plain(text):
 
 # ── 请求处理 ────────────────────────────────────────────────────────────
 class Handler(BaseHTTPRequestHandler):
-    server_version = "Sujian/1.0"
+    server_version = "SuJot/1.0"
     protocol_version = "HTTP/1.1"
 
     # —— 基础 ——
@@ -798,7 +829,7 @@ class Handler(BaseHTTPRequestHandler):
     # 首次登录必须先改用户名+密码：没改完之前，笔记相关的写接口一律拒绝
     WRITE_PATHS = ("/api/save", "/api/create", "/api/rename", "/api/delete", "/api/restore",
                    "/api/purge", "/api/trash/empty", "/api/move", "/api/reorder",
-                   "/api/mkdir", "/api/upload")
+                   "/api/mkdir", "/api/upload", "/api/media/save")
 
     def _must_change(self):
         return bool((load_users().get(self.user) or {}).get("must_change"))
@@ -880,6 +911,28 @@ class Handler(BaseHTTPRequestHandler):
             with open(full, "rb") as f:
                 blob = f.read()
             return self._send(200, blob, ctype, {"Cache-Control": "private, max-age=3600"})
+        if p == "/api/media":
+            # 一篇笔记的媒体库：默认读「笔记名.assets」，也允许直接指定 dir
+            doc = (qs.get("doc") or [""])[0]
+            want = (qs.get("dir") or [""])[0]
+            if not doc and not want:
+                return self._json({"error": "缺少 doc 参数"}, 400)
+            try:
+                rel = want or assets_dir_rel(rel_of(safe_path(doc)))
+                folder = safe_path(rel)
+            except ValueError:
+                return self._json({"error": "非法路径"}, 400)
+            items = []
+            if os.path.isdir(folder):
+                for n in sorted(os.listdir(folder), key=natural):
+                    fp = os.path.join(folder, n)
+                    if not os.path.isfile(fp) or os.path.splitext(n)[1].lower() not in IMG_EXTS:
+                        continue
+                    st = os.stat(fp)
+                    items.append({"name": n, "path": rel + "/" + n,
+                                  "size": st.st_size, "mtime": int(st.st_mtime),
+                                  "url": "/api/raw?path=" + urllib.parse.quote(rel + "/" + n)})
+            return self._json({"dir": rel, "exists": os.path.isdir(folder), "items": items})
         if p == "/api/trash":
             items = []
             for fn in sorted(os.listdir(TRASH), reverse=True):
@@ -948,7 +1001,15 @@ class Handler(BaseHTTPRequestHandler):
             if ext not in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp"):
                 ext = ".png"
             stem = re.sub(r"[^\w\u4e00-\u9fff.\-]", "_", os.path.splitext(name)[0])[:50] or "图"
-            folder = os.path.join(NOTES, "assets")
+            # 带 doc 就存进这篇笔记自己的媒体目录（<笔记名>.assets），否则退回老的全库 assets/
+            doc = str(data.get("doc") or "").strip()
+            if doc:
+                try:
+                    folder = safe_path(assets_dir_rel(rel_of(safe_path(doc))))
+                except ValueError:
+                    return self._json({"error": "非法路径"}, 400)
+            else:
+                folder = os.path.join(NOTES, "assets")
             os.makedirs(folder, exist_ok=True)
             target = os.path.join(folder, stem + ext)
             n = 1
@@ -960,6 +1021,48 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "path": rel, "name": os.path.basename(target),
                                "url": "/api/raw?path=" + urllib.parse.quote(rel),
                                "size": len(blob)})
+        if p == "/api/media/save":
+            # 媒体库编辑后覆盖原图（只允许图片，且必须落在笔记库内的媒体目录里）
+            rel = str(data.get("path") or "")
+            b64 = str(data.get("data") or "")
+            if "," in b64[:80] and b64[:40].lower().startswith("data:"):
+                b64 = b64.split(",", 1)[1]
+            try:
+                blob = base64.b64decode(b64, validate=False)
+            except Exception:
+                return self._json({"error": "图片数据不合法"}, 400)
+            if not blob:
+                return self._json({"error": "空文件"}, 400)
+            if len(blob) > UPLOAD_MAX:
+                return self._json({"error": "图片太大（上限 %dMB）" % (UPLOAD_MAX // 1048576)}, 413)
+            try:
+                full = safe_path(rel)
+            except ValueError:
+                return self._json({"error": "非法路径"}, 400)
+            if os.path.splitext(full)[1].lower() not in IMG_EXTS:
+                return self._json({"error": "只能保存图片"}, 400)
+            if not os.path.isfile(full):
+                return self._json({"error": "找不到这张图"}, 404)
+            if not any(part.endswith(".assets") for part in rel_of(full).split("/")[:-1]) \
+                    and not rel_of(full).startswith("assets/"):
+                return self._json({"error": "只能写笔记的媒体目录"}, 403)
+            with _LOCK:
+                tmp = full + ".tmp"
+                with open(tmp, "wb") as f:
+                    f.write(blob)
+                os.replace(tmp, full)
+                # 同名旧图（换过扩展名/旧版本）直接删掉，不留第二份
+                stem = os.path.splitext(full)[0]
+                for old in glob.glob(glob.escape(stem) + ".*"):
+                    if os.path.abspath(old) == os.path.abspath(full):
+                        continue
+                    if os.path.splitext(old)[1].lower() in IMG_EXTS:
+                        try:
+                            os.remove(old)
+                        except OSError:
+                            pass
+            return self._json({"ok": True, "path": rel_of(full), "size": len(blob),
+                               "mtime": int(os.path.getmtime(full))})
         if p == "/api/username":
             new = str(data.get("username") or "").strip()
             if new == self.user:
@@ -1054,6 +1157,9 @@ class Handler(BaseHTTPRequestHandler):
             full = os.path.join(folder, name)
             if os.path.exists(full):
                 full = os.path.join(folder, "%s-%d.md" % (os.path.splitext(name)[0], int(time.time())))
+            # 每篇笔记配一个同名媒体目录，媒体库有地方落图
+            os.makedirs(os.path.join(folder, os.path.splitext(os.path.basename(full))[0] + ".assets"),
+                        exist_ok=True)
             stamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
             with open(full, "w", encoding="utf-8") as f:
                 f.write("---\ntitle: %s\ncreated: %s\n---\n\n# %s\n\n" % (title, stamp, title))
@@ -1128,6 +1234,21 @@ class Handler(BaseHTTPRequestHandler):
                     with _LOCK:
                         os.rename(full, target)
                     newrel = rel_of(target)
+                    # 同名媒体目录跟着改，正文里的相对引用一起换
+                    old_stem = os.path.splitext(os.path.basename(full))[0]
+                    new_stem = os.path.splitext(safe_name)[0]
+                    old_dir = os.path.join(os.path.dirname(full), old_stem + ".assets")
+                    new_dir = os.path.join(os.path.dirname(full), new_stem + ".assets")
+                    if os.path.isdir(old_dir) and not os.path.exists(new_dir):
+                        with _LOCK:
+                            os.rename(old_dir, new_dir)
+                    if old_stem != new_stem:
+                        with open(target, "r", encoding="utf-8") as f:
+                            txt = f.read()
+                        if old_stem + ".assets/" in txt:
+                            with _LOCK:
+                                with open(target, "w", encoding="utf-8") as f:
+                                    f.write(txt.replace(old_stem + ".assets/", new_stem + ".assets/"))
             return self._json({"ok": True, "path": newrel})
         if p == "/api/delete":
             rel = str(data.get("path") or "")
@@ -1268,7 +1389,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(404, "not found", "text/plain; charset=utf-8")
         with open(path, "rb") as f:
             blob = f.read()
-        blob = re.sub(rb"\?v=[0-9A-Za-z._-]+", b"?v=" + APP_VERSION.encode(), blob)
+        blob = re.sub(rb"\?v=[0-9A-Za-z._-]+", b"?v=" + STATIC_VER.encode(), blob)
         return self._file(path, immutable=False, body=blob)
 
     def _file(self, path, immutable=False, body=None):
@@ -1314,9 +1435,9 @@ def _open_browser_later(url, delay=1.2):
     """本机双击/终端启动时，顺手把浏览器打开。
 
     只在「交互式终端」里做（stdout 是 tty）：systemd 这类没有终端的环境一律跳过，
-    所以服务器上跑不会莫名其妙去开浏览器。想关掉：设 SUJIAN_NO_OPEN=1。
+    所以服务器上跑不会莫名其妙去开浏览器。想关掉：设 SUJOT_NO_OPEN=1。
     """
-    if os.environ.get("SUJIAN_NO_OPEN"):
+    if os.environ.get("SUJOT_NO_OPEN"):
         return
     if not OPEN_BROWSER:
         return
