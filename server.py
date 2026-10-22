@@ -908,9 +908,16 @@ class Handler(BaseHTTPRequestHandler):
             if not os.path.isfile(full):
                 return self._json({"error": "找不到文件"}, 404)
             ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
+            hdrs = {"Cache-Control": "private, max-age=3600"}
+            # SVG / HTML / XML 直接在浏览器打开时会在本站源下执行脚本，改成「下载」并加 CSP 沙箱。
+            # 经 <img> 渲染不受影响：浏览器对子资源请求会忽略 Content-Disposition。
+            if ctype in ("image/svg+xml", "text/html", "application/xhtml+xml",
+                         "application/xml", "text/xml"):
+                hdrs["Content-Disposition"] = "attachment"
+                hdrs["Content-Security-Policy"] = "sandbox; default-src 'none'; style-src 'unsafe-inline'"
             with open(full, "rb") as f:
                 blob = f.read()
-            return self._send(200, blob, ctype, {"Cache-Control": "private, max-age=3600"})
+            return self._send(200, blob, ctype, hdrs)
         if p == "/api/media":
             # 一篇笔记的媒体库：默认读「笔记名.assets」，也允许直接指定 dir
             doc = (qs.get("doc") or [""])[0]

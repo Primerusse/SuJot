@@ -7,6 +7,7 @@
 #   --port N     监听端口（默认 8013）
 #   --base DIR   数据目录（默认 /srv/sujian）
 #   --name NAME  systemd 服务名（默认 sujian）
+#   --user USER  运行服务的系统用户（默认 sujian；不建则自动建）
 #
 # 只想在自己电脑上跑：用根目录的 ./start_run_locally.sh（Windows 双击 start_run_locally.cmd）。
 # 本脚本不联网、不装第三方包：只用系统里装好的 Python 3（3.8+）。
@@ -16,12 +17,14 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PORT=8013
 BASE=""
 NAME="sujian"
+SVCUSER="sujian"
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --port)    PORT="$2"; shift 2 ;;
     --base)    BASE="$2"; shift 2 ;;
     --name)    NAME="$2"; shift 2 ;;
+    --user)    SVCUSER="$2"; shift 2 ;;
     -h|--help) sed -n '2,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "未知参数：$1（--help 看用法）" >&2; exit 2 ;;
   esac
@@ -64,6 +67,20 @@ esac
 mkdir -p "$BASE" 2>/dev/null || { say "✗ 建不了数据目录 $BASE（要 sudo？）"; exit 1; }
 say "✓ 数据目录：$BASE"
 
+# ── 专用运行用户（v0.2.1）────────────────────────────────────
+# 服务不以 root 跑：万一站点有漏洞，攻击者只能拿到这个用户
+if ! id "$SVCUSER" >/dev/null 2>&1; then
+  if command -v useradd >/dev/null 2>&1; then
+    useradd --system --no-create-home --home-dir "$BASE" --shell /usr/sbin/nologin "$SVCUSER" 2>/dev/null \
+      || useradd -r -M -d "$BASE" -s /usr/sbin/nologin "$SVCUSER"
+    say "✓ 已创建系统用户：$SVCUSER"
+  else
+    say "✗ 没有 useradd，请先手建用户 $SVCUSER，或用 --user root 显式跳过降权"; exit 1
+  fi
+fi
+chown -R "$SVCUSER:$SVCUSER" "$BASE"
+say "✓ 数据目录属主：$SVCUSER"
+
 # ── 3. 装 systemd 服务 ──────────────────────────────────────────────────
 if [ "$(id -u)" != "0" ]; then
   say "✗ 需要 root：sudo deploy/install-service.sh"; exit 1
@@ -86,6 +103,12 @@ else
   PRIVATETMP="PrivateTmp=true"
 fi
 
+# ProtectHome=true 会把 /home 和 /root 整个遮住；代码或数据落在那里时服务会读不到
+case "$ROOT" in
+  /home/*|/root/*) PROTECTHOME="ProtectHome=read-only"; say "· 代码在 $ROOT，ProtectHome 降为 read-only（否则服务读不到代码）" ;;
+  *)               PROTECTHOME="ProtectHome=true" ;;
+esac
+
 cat > "$UNIT" <<UNITEOF
 [Unit]
 Description=速笺 SuJot 笔记服务
@@ -93,6 +116,8 @@ After=network.target
 
 [Service]
 Type=simple
+User=$SVCUSER
+Group=$SVCUSER
 WorkingDirectory=$ROOT
 
 # 数据目录（笔记 / 历史版本 / 回收站 / 账号 / 站点配置都在这里）
@@ -103,8 +128,21 @@ ExecStart=$PYABS $ROOT/server.py
 Restart=always
 RestartSec=2
 
+# ── 沙箱（v0.2.1）──
 NoNewPrivileges=true
 $PRIVATETMP
+PrivateDevices=true
+ProtectSystem=strict
+$PROTECTHOME
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=$BASE
 
 [Install]
 WantedBy=multi-user.target

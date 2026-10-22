@@ -2,6 +2,27 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)：`主版本.次版本.修订号`。
 
+## [0.2.1] — 2026-10-23
+
+**安全版：修复一个存在于 0.2.0 的 XSS，并把默认部署从“以 root 跑”改成“专用用户 + systemd 沙箱”。功能无变化。**
+
+- **修复 SVG / HTML / XML 直接打开时的脚本执行问题**（高危）。
+  媒体上传白名单允许 `.svg`，而 `/api/raw` 在 0.2.0 里是“按 MIME 原样返回”。
+  一个内含 `<script>` 的 SVG 被**直接访问**时，脚本会在站点自己的源下执行（可读取 Cookie、代表你发起请求）。
+  现在这类 MIME 一律返回 `Content-Disposition: attachment`，并附加
+  `Content-Security-Policy: sandbox; default-src 'none'`。
+  正文里的图片仍然照常显示 —— 浏览器对 `<img>` 子资源请求会忽略 `Content-Disposition`。
+- **默认不再以 root 运行**。`deploy/sujian.service` 新增 `User=` / `Group=`，
+  `deploy/install-service.sh` 会自动建一个系统用户（默认名 `sujian`，可用 `--user` 改）
+  并把数据目录交给它。
+- **systemd 沙箱收紧**：`ProtectSystem=strict`、`ProtectHome`、`PrivateDevices`、
+  `ProtectKernelTunables/Modules/ControlGroups`、`RestrictAddressFamilies`、`RestrictNamespaces`、
+  `LockPersonality`，并清空能力集（`CapabilityBoundingSet=`）。
+  服务只能写 `ReadWritePaths` 指定的数据目录。
+- **升级注意**：从 0.2.0 升上来的自建部署，重跑一遍
+  `sudo deploy/install-service.sh`（它会建用户、改属主、重写 unit），
+  而不是只换 `server.py`。只换代码不重装服务的话，降权和沙箱不会生效。
+
 ## [0.2.0] — 2026-10-17
 
 **媒体库：每篇笔记一个自己的图片目录，右键就能开相册、就地改图，拍歪的纸面还能拉正。**
