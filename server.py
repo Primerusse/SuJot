@@ -335,9 +335,19 @@ def bootstrap_users():
         print("已建立初始账号 %s（密码沿用 %s 里的旧密码；建议尽快改掉并删除该文件）"
               % (DEFAULT_USER, PASSFILE), flush=True)
     else:
-        add_user(DEFAULT_USER, DEFAULT_PW, DEFAULT_USER, must_change=True)
-        print("已建立初始账号 %s —— 初始口令与账号名相同，首次登录后必须修改昵称和密码"
-              % DEFAULT_USER, flush=True)
+        # 不再用与账号名相同的固定口令：那个窗口期任何人都能登进来读笔记、改密码
+        pw = secrets.token_urlsafe(12)
+        add_user(DEFAULT_USER, pw, DEFAULT_USER, must_change=True)
+        try:
+            fp = os.path.join(BASE, "INITIAL_PASSWORD")
+            fd = os.open(fp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write("%s\n%s\n" % (DEFAULT_USER, pw))
+        except Exception as e:
+            print("初始口令文件没写成：%s" % e, flush=True)
+        print("已建立初始账号 %s —— 初始口令为随机生成，已写入 %s/INITIAL_PASSWORD（仅本机可读）"
+              % (DEFAULT_USER, BASE), flush=True)
+        print("初始口令：%s" % pw, flush=True)
 
 
 def seed_notes():
@@ -570,6 +580,34 @@ def verify(token):
         return None
 
 
+def client_ip(handler):
+    """真实客户端 IP。
+
+    前面挂着同机反代（nginx）时，socket 对端永远是 127.0.0.1，直接用
+    self.client_address[0] 会让「按 IP 限流/锁定」退化成全局锁定——任何人
+    连错几次就能把主人锁在门外。所以：只有对端是本机时才采信反代头，
+    直连时一律用 socket 地址，避免客户端伪造 X-Real-IP。
+    """
+    peer = handler.client_address[0]
+    if peer not in ("127.0.0.1", "::1"):
+        return peer
+    for hdr in ("X-Real-IP", "X-Forwarded-For"):
+        raw = handler.headers.get(hdr) or ""
+        cand = raw.split(",")[0].strip()
+        if not cand:
+            continue
+        if len(cand) <= 45 and re.match(r"^[0-9A-Fa-f:.]+$", cand):
+            return cand.strip("[]")
+    return peer
+
+
+def is_direct_local(handler):
+    """是否「真的从服务器本机直连」——没经过任何反代。"""
+    return (handler.client_address[0] in ("127.0.0.1", "::1")
+            and not handler.headers.get("X-Real-IP")
+            and not handler.headers.get("X-Forwarded-For"))
+
+
 def search(query, limit=60, field="both"):
     q = (query or "").strip()
     if not q:
@@ -720,7 +758,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # —— 登录 ——
     def _login(self):
-        ip = self.client_address[0]
+        ip = client_ip(self)
         cnt, until = _ATTEMPTS.get(ip, [0, 0])
         if cnt >= LOGIN_ATTEMPTS and time.time() < until:
             return self._json({"error": "尝试过多，请 %d 秒后再试" % int(until - time.time())}, 429)
@@ -796,7 +834,7 @@ class Handler(BaseHTTPRequestHandler):
         这是给项目刚部署时用的，不是访客自助注册入口。"""
         if load_users():
             return self._json({"error": "已经初始化过了，注册入口已关闭"}, 403)
-        ip = self.client_address[0]
+        ip = client_ip(self)
         cnt, until = _ATTEMPTS.get("reg:" + ip, [0, 0])
         if cnt >= LOGIN_ATTEMPTS and time.time() < until:
             return self._json({"error": "尝试过多，请 %d 秒后再试" % int(until - time.time())}, 429)
@@ -1092,7 +1130,7 @@ class Handler(BaseHTTPRequestHandler):
             self.user = new
             tok = sign("%s|%d" % (new, int(time.time()) + SESSION_DAYS * 86400))
             _LOGS.append((time.strftime("%Y-%m-%d %H:%M:%S"), "%s → %s" % (old, new),
-                          self.client_address[0], "改用户名"))
+                          client_ip(self), "改用户名"))
             return self._json({"ok": True, "user": new, "display": new}, 200, {
                 "Set-Cookie": "%s=%s; Path=/; Max-Age=%d; HttpOnly; Secure; SameSite=Lax"
                               % (COOKIE, tok, SESSION_DAYS * 86400)})
@@ -1113,6 +1151,10 @@ class Handler(BaseHTTPRequestHandler):
             u.pop("must_change", None)
             users[self.user] = u
             save_users(users)
+            try:                                  # 口令已经改掉，初始口令文件没用了
+                os.remove(os.path.join(BASE, "INITIAL_PASSWORD"))
+            except OSError:
+                pass
             return self._json({"ok": True})
         if p == "/api/logout":
             return self._json({"ok": True}, 200,

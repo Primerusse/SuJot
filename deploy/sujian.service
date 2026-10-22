@@ -10,7 +10,9 @@ Group=sujian
 WorkingDirectory=/srv/sujian
 
 # 数据目录（笔记 / 历史版本 / 回收站 / 账号 / 站点配置都在这里）
+Environment=SUJOT_BASE=/srv/sujian
 Environment=SUJIAN_BASE=/srv/sujian
+Environment=SUJOT_PORT=8013
 Environment=SUJIAN_PORT=8013
 
 ExecStart=/usr/bin/python3 /srv/sujian/server.py

@@ -121,7 +121,9 @@ Group=$SVCUSER
 WorkingDirectory=$ROOT
 
 # 数据目录（笔记 / 历史版本 / 回收站 / 账号 / 站点配置都在这里）
+Environment=SUJOT_BASE=$BASE
 Environment=SUJIAN_BASE=$BASE
+Environment=SUJOT_PORT=$PORT
 Environment=SUJIAN_PORT=$PORT
 
 ExecStart=$PYABS $ROOT/server.py

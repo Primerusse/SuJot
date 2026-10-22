@@ -17,3 +17,6 @@ __pycache__/
 *.pyc
 .DS_Store
 Thumbs.db
+
+# 首次启动生成的随机初始口令（改完密码自动删除）
+INITIAL_PASSWORD
